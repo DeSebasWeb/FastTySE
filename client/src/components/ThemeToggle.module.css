@@ -1,0 +1,14 @@
+.toggle {
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.toggle:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}

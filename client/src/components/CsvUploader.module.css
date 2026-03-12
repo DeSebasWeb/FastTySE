@@ -1,0 +1,71 @@
+.container {
+  margin-bottom: 1.5rem;
+}
+
+.dropzone {
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.dropzoneActive {
+  border-color: var(--accent);
+  background: rgba(108, 99, 255, 0.1);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.dropText {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.progressBar {
+  position: relative;
+  height: 1.5rem;
+  background: var(--bg);
+  border-radius: var(--radius);
+  margin-top: 0.75rem;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+  border-radius: var(--radius);
+}
+
+.progressText {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.error {
+  margin-top: 0.75rem;
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+
+.success {
+  margin-top: 0.75rem;
+  color: var(--success);
+  font-size: 0.875rem;
+}

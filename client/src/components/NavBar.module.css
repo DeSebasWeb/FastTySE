@@ -1,0 +1,84 @@
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.logo {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.links {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.link,
+.active {
+  text-decoration: none;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+}
+
+.link:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.userName {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.userRole {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.logoutBtn {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.logoutBtn:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
