@@ -1,6 +1,41 @@
 import { useState, useRef, useEffect } from 'react';
 import styles from './EvidenceModal.module.css';
 
+function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRight, extraTools }) {
+  const [zoom, setZoom] = useState(1);
+
+  const viewerClass = size === 'large' ? styles.imageViewerLarge : styles.imageViewerSmall;
+
+  return (
+    <>
+      <div className={styles.toolbar}>
+        <button className={styles.toolBtn} onClick={() => setZoom((z) => Math.max(0.15, z / 1.3))}>-</button>
+        <span className={styles.toolLabel}>{Math.round(zoom * 100)}%</span>
+        <button className={styles.toolBtn} onClick={() => setZoom((z) => Math.min(5, z * 1.3))}>+</button>
+        <button className={styles.toolBtn} onClick={() => setZoom(1)}>Reset</button>
+        {showRotate && (
+          <>
+            <span className={styles.toolSep} />
+            <button className={styles.toolBtn} onClick={onRotateLeft}>Rotar izq.</button>
+            <button className={styles.toolBtn} onClick={onRotateRight}>Rotar der.</button>
+          </>
+        )}
+        {extraTools}
+      </div>
+      <div className={viewerClass}>
+        <div className={styles.imageInner}>
+          <img
+            src={src}
+            alt="Evidencia"
+            className={styles.image}
+            style={{ transform: `rotate(${rotation}deg) scale(${zoom})`, transformOrigin: 'center center' }}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function EvidenceModal({ evidence, onSave, onDelete, onClose, readOnly }) {
   const hasExisting = evidence?.status === 'uploaded';
   const [editing, setEditing] = useState(!hasExisting);
@@ -10,14 +45,6 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
   const [saving, setSaving] = useState(false);
   const dropRef = useRef(null);
 
-  function imageTransform(deg) {
-    const isVertical = deg % 180 !== 0;
-    return isVertical
-      ? `rotate(${deg}deg) scale(0.65)`
-      : `rotate(${deg}deg)`;
-  }
-
-  // Listen for paste events (only in edit mode)
   useEffect(() => {
     if (readOnly) return;
     function handlePaste(e) {
@@ -47,9 +74,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
     e.preventDefault();
     if (readOnly || !editing) return;
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-      readFile(file);
-    }
+    if (file && file.type.startsWith('image/')) readFile(file);
   }
 
   function handleFileSelect(e) {
@@ -94,22 +119,14 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
   if (readOnly) {
     return (
       <div className={styles.overlay} onClick={onClose}>
-        <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
           <div className={styles.header}>
             <h3>Evidencia E14</h3>
             <button className={styles.closeBtn} onClick={onClose}>&times;</button>
           </div>
-
           {hasExisting ? (
             <>
-              <div className={styles.imageWrap}>
-                <img
-                  src={evidence.image_data}
-                  alt="Evidencia"
-                  className={styles.image}
-                  style={{ transform: imageTransform(evidence.rotation || 0) }}
-                />
-              </div>
+              <ImageViewer src={evidence.image_data} rotation={evidence.rotation || 0} size="large" />
               {evidence.observations && (
                 <div className={styles.field}>
                   <label className={styles.label}>Observaciones</label>
@@ -131,20 +148,13 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
   if (hasExisting && !editing) {
     return (
       <div className={styles.overlay} onClick={onClose}>
-        <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
           <div className={styles.header}>
             <h3>Evidencia E14</h3>
             <button className={styles.closeBtn} onClick={onClose}>&times;</button>
           </div>
 
-          <div className={styles.imageWrap}>
-            <img
-              src={imageData}
-              alt="Evidencia"
-              className={styles.image}
-              style={{ transform: imageTransform(rotation) }}
-            />
-          </div>
+          <ImageViewer src={imageData} rotation={rotation} size="large" />
 
           {observations && (
             <div className={styles.field}>
@@ -154,17 +164,10 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
           )}
 
           <div className={styles.actions}>
-            <button
-              className={styles.saveBtn}
-              onClick={() => setEditing(true)}
-            >
+            <button className={styles.saveBtn} onClick={() => setEditing(true)}>
               Actualizar
             </button>
-            <button
-              className={styles.deleteEvidenceBtn}
-              onClick={handleDelete}
-              disabled={saving}
-            >
+            <button className={styles.deleteEvidenceBtn} onClick={handleDelete} disabled={saving}>
               {saving ? 'Eliminando...' : 'Eliminar evidencia'}
             </button>
           </div>
@@ -182,27 +185,45 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
           <button className={styles.closeBtn} onClick={onClose}>&times;</button>
         </div>
 
-        <div
-          ref={dropRef}
-          className={styles.dropZone}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-        >
-          {imageData ? (
-            <div className={styles.imageWrap}>
-              <img
-                src={imageData}
-                alt="Evidencia"
-                className={styles.image}
-                style={{ transform: imageTransform(rotation) }}
-              />
-              <div className={styles.rotateControls}>
-                <button onClick={rotateLeft} className={styles.rotateBtn}>Rotar izq.</button>
-                <button onClick={rotateRight} className={styles.rotateBtn}>Rotar der.</button>
-                <button onClick={() => setImageData(null)} className={styles.removeBtn}>Quitar</button>
+        {imageData ? (
+          <>
+            <ImageViewer
+              src={imageData}
+              rotation={rotation}
+              size="small"
+              showRotate
+              onRotateLeft={rotateLeft}
+              onRotateRight={rotateRight}
+              extraTools={
+                <>
+                  <span className={styles.toolSep} />
+                  <button className={styles.toolBtn} onClick={() => setImageData(null)} style={{ color: 'var(--danger)' }}>Quitar</button>
+                </>
+              }
+            />
+
+            <div
+              ref={dropRef}
+              className={styles.dropZone}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              style={{ minHeight: '50px', padding: '0.5rem' }}
+            >
+              <div className={styles.placeholder}>
+                <label className={styles.fileLabel}>
+                  Cambiar imagen
+                  <input type="file" accept="image/*" onChange={handleFileSelect} hidden />
+                </label>
               </div>
             </div>
-          ) : (
+          </>
+        ) : (
+          <div
+            ref={dropRef}
+            className={styles.dropZone}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+          >
             <div className={styles.placeholder}>
               <p>Arrastra una imagen, pega con Ctrl+V, o</p>
               <label className={styles.fileLabel}>
@@ -210,8 +231,8 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
                 <input type="file" accept="image/*" onChange={handleFileSelect} hidden />
               </label>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className={styles.field}>
           <label className={styles.label}>Observaciones (opcional)</label>
@@ -219,7 +240,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
             value={observations}
             onChange={(e) => setObservations(e.target.value)}
             className={styles.textarea}
-            rows={3}
+            rows={2}
             placeholder="Notas adicionales..."
           />
         </div>
@@ -233,11 +254,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
             {saving ? 'Guardando...' : hasExisting ? 'Actualizar evidencia' : 'Guardar evidencia'}
           </button>
           {!hasExisting && (
-            <button
-              className={styles.noEvidenceBtn}
-              onClick={() => handleSave('no_evidence')}
-              disabled={saving}
-            >
+            <button className={styles.noEvidenceBtn} onClick={() => handleSave('no_evidence')} disabled={saving}>
               Sin evidencia
             </button>
           )}
