@@ -1,0 +1,468 @@
+import { useState, useEffect, useMemo } from 'react';
+import NavBar from '../components/NavBar.jsx';
+import FilteredTable from '../components/FilteredTable.jsx';
+import EvidenceModal from '../components/EvidenceModal.jsx';
+import {
+  getAssignments, getMultiRows, getEvidences, saveEvidence, deleteEvidence,
+  deleteAssignment, getAssignmentSiblings, getAnalysts, createAssignments,
+} from '../lib/api.js';
+import { useAuth } from '../hooks/useAuth.jsx';
+import styles from './MyAssignments.module.css';
+
+export default function MyAssignments() {
+  const { user } = useAuth();
+  const isAdmin = user?.rol === 'Administrador';
+
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loadingRows, setLoadingRows] = useState(false);
+
+  // Evidence state
+  const [evidences, setEvidences] = useState({});
+  const [modalRow, setModalRow] = useState(null);
+
+  // Admin: siblings + assign form
+  const [siblings, setSiblings] = useState([]);
+  const [analysts, setAnalysts] = useState([]);
+  const [selectedUsers, setSelectedUsers] = useState(new Set());
+  const [userRanges, setUserRanges] = useState({});
+  const [assigning, setAssigning] = useState(false);
+
+  useEffect(() => {
+    getAssignments()
+      .then(setAssignments)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Load rows when an assignment is selected
+  useEffect(() => {
+    if (!selected) return;
+    setLoadingRows(true);
+
+    const rangeOpts = {};
+    if (!isAdmin && selected.range_from && selected.range_to) {
+      rangeOpts.rangeFrom = selected.range_from;
+      rangeOpts.rangeTo = selected.range_to;
+    }
+
+    const blocks = Array.isArray(selected.filters) ? selected.filters : [selected.filters];
+
+    Promise.all([
+      getMultiRows(blocks, page, 100, rangeOpts),
+      page === 1 ? getEvidences(selected.id) : Promise.resolve(null),
+    ])
+      .then(([data, evMap]) => {
+        setRows(data.rows);
+        setTotalPages(data.pagination.totalPages);
+        setTotal(data.pagination.total);
+        if (evMap) setEvidences(evMap);
+      })
+      .catch(console.error)
+      .finally(() => setLoadingRows(false));
+  }, [selected?.id, page]);
+
+  // Load evidences when assignment changes
+  useEffect(() => {
+    if (!selected) return;
+    getEvidences(selected.id).then(setEvidences).catch(console.error);
+  }, [selected?.id]);
+
+  // Reset on assignment change
+  useEffect(() => {
+    setPage(1);
+    setRows([]);
+    setEvidences({});
+    setSiblings([]);
+    setSelectedUsers(new Set());
+    setUserRanges({});
+  }, [selected?.id]);
+
+  // Admin: load siblings + analysts
+  useEffect(() => {
+    if (!selected || !isAdmin) return;
+    getAssignmentSiblings(selected.id).then(setSiblings).catch(console.error);
+    getAnalysts().then(setAnalysts).catch(console.error);
+  }, [selected?.id, isAdmin]);
+
+  function handleBack() {
+    setSelected(null);
+    setRows([]);
+    setPage(1);
+    setEvidences({});
+    setSiblings([]);
+  }
+
+  async function handleDelete(e, id) {
+    e.stopPropagation();
+    if (!confirm('¿Eliminar esta asignación?')) return;
+    try {
+      await deleteAssignment(id);
+      setAssignments((prev) => prev.filter((a) => a.id !== id));
+      if (selected?.id === id) handleBack();
+    } catch (err) {
+      console.error('Delete error:', err);
+    }
+  }
+
+  async function handleDeleteSibling(id) {
+    if (!confirm('¿Eliminar esta asignación?')) return;
+    try {
+      await deleteAssignment(id);
+      setSiblings((prev) => prev.filter((s) => s.id !== id));
+      setAssignments((prev) => prev.filter((a) => a.id !== id));
+      if (selected?.id === id) handleBack();
+    } catch (err) {
+      console.error('Delete sibling error:', err);
+    }
+  }
+
+  async function handleSaveEvidence({ status, imageData, rotation, observations }) {
+    if (!modalRow || !selected) return;
+    const result = await saveEvidence({
+      assignmentId: selected.id,
+      rowIndex: modalRow.rowIndex,
+      status,
+      imageData,
+      rotation,
+      observations,
+    });
+    setEvidences((prev) => ({ ...prev, [modalRow.rowIndex]: result }));
+  }
+
+  async function handleDeleteEvidence(evidenceId) {
+    if (!modalRow) return;
+    const { row_index } = await deleteEvidence(evidenceId);
+    setEvidences((prev) => {
+      const next = { ...prev };
+      delete next[row_index];
+      return next;
+    });
+  }
+
+  // --- Admin: assign remaining rows ---
+  function computeAssignedRanges() {
+    return siblings
+      .filter((s) => s.range_from && s.range_to)
+      .map((s) => ({ from: s.range_from, to: s.range_to, user: s.user_name, id: s.id }))
+      .sort((a, b) => a.from - b.from);
+  }
+
+  function computeNextFrom() {
+    const ranges = computeAssignedRanges();
+    if (ranges.length === 0) return 1;
+    return Math.max(...ranges.map((r) => r.to)) + 1;
+  }
+
+  function toggleUser(analyst) {
+    setSelectedUsers((prev) => {
+      const next = new Set(prev);
+      if (next.has(analyst.id)) {
+        next.delete(analyst.id);
+        setUserRanges((r) => { const n = { ...r }; delete n[analyst.id]; return n; });
+      } else {
+        next.add(analyst.id);
+        const nextFrom = computeNextFrom();
+        setUserRanges((r) => ({ ...r, [analyst.id]: { from: nextFrom, to: total } }));
+      }
+      return next;
+    });
+  }
+
+  function setRange(userId, field, value) {
+    setUserRanges((prev) => ({
+      ...prev,
+      [userId]: { ...prev[userId], [field]: Number(value) || 0 },
+    }));
+  }
+
+  async function handleAssignMore() {
+    if (selectedUsers.size === 0 || !selected) return;
+    setAssigning(true);
+    try {
+      const users = analysts.filter((a) => selectedUsers.has(a.id));
+      const blocks = Array.isArray(selected.filters) ? selected.filters : [selected.filters];
+
+      const usersWithRanges = users.map((u) => ({
+        ...u,
+        rangeFrom: userRanges[u.id]?.from || 1,
+        rangeTo: userRanges[u.id]?.to || total,
+      }));
+
+      await createAssignments(usersWithRanges, blocks, selected.label);
+
+      const [newSiblings, newAssignments] = await Promise.all([
+        getAssignmentSiblings(selected.id),
+        getAssignments(),
+      ]);
+      setSiblings(newSiblings);
+      setAssignments(newAssignments);
+      setSelectedUsers(new Set());
+      setUserRanges({});
+    } catch (err) {
+      console.error('Assign more error:', err);
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  // Extra columns: evidence status for both admin and analyst
+  const extraColumns = useMemo(() => {
+    if (!selected) return undefined;
+    return [
+      {
+        id: '_evidence',
+        header: 'Evidencia',
+        cell: (info) => {
+          const globalIndex = (page - 1) * 100 + info.row.index + 1;
+          const ev = evidences[globalIndex];
+
+          if (isAdmin) {
+            // Admin: status badge + click to view
+            const label = ev?.status === 'uploaded'
+              ? 'Hecho'
+              : ev?.status === 'no_evidence'
+              ? 'Sin evidencia'
+              : 'Faltante';
+            const color = ev?.status === 'uploaded'
+              ? 'var(--success, #27ae60)'
+              : ev?.status === 'no_evidence'
+              ? 'var(--text-muted)'
+              : 'var(--danger, #e74c3c)';
+
+            return (
+              <button
+                onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color,
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: '0.15rem 0',
+                  textDecoration: ev?.status === 'uploaded' ? 'underline' : 'none',
+                }}
+              >
+                {label}
+              </button>
+            );
+          }
+
+          // Analyst: upload/view button
+          const statusLabel = ev?.status === 'uploaded'
+            ? 'Cargada'
+            : ev?.status === 'no_evidence'
+            ? 'Sin evidencia'
+            : null;
+
+          return (
+            <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+              <button
+                onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
+                style={{
+                  background: ev?.status === 'uploaded' ? 'var(--success)' : 'var(--accent)',
+                  color: '#fff',
+                  fontSize: '0.72rem',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: 'var(--radius)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {ev?.status === 'uploaded' ? 'Ver' : ev?.status === 'no_evidence' ? 'Editar' : 'Cargar'}
+              </button>
+              {statusLabel && (
+                <span style={{
+                  fontSize: '0.68rem',
+                  color: ev?.status === 'uploaded' ? 'var(--success)' : 'var(--text-muted)',
+                  fontWeight: 500,
+                }}>
+                  {statusLabel}
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+    ];
+  }, [selected, page, evidences, isAdmin]);
+
+  const assignedRanges = selected && isAdmin ? computeAssignedRanges() : [];
+
+  return (
+    <div className={styles.page}>
+      <NavBar />
+      <main className={styles.main}>
+        {!selected ? (
+          <>
+            <h2 className={styles.title}>
+              {isAdmin ? 'Asignaciones' : 'Mis Asignaciones'}
+            </h2>
+            {loading ? (
+              <p className={styles.muted}>Cargando...</p>
+            ) : assignments.length === 0 ? (
+              <p className={styles.muted}>No tienes asignaciones aun.</p>
+            ) : (
+              <div className={styles.list}>
+                {assignments.map((a) => (
+                  <div
+                    key={a.id}
+                    className={styles.card}
+                    onClick={() => setSelected(a)}
+                  >
+                    <div>
+                      <span className={styles.label}>{a.label}</span>
+                      {a.range_from && a.range_to && (
+                        <span className={styles.range}> (filas {a.range_from} - {a.range_to})</span>
+                      )}
+                      {isAdmin && a.user_name && (
+                        <span className={styles.userName}> — {a.user_name}</span>
+                      )}
+                    </div>
+                    <div className={styles.cardRight}>
+                      <span className={styles.date}>
+                        {new Date(a.created_at).toLocaleString()}
+                      </span>
+                      {isAdmin && (
+                        <button
+                          className={styles.deleteBtn}
+                          onClick={(e) => handleDelete(e, a.id)}
+                        >
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className={styles.header}>
+              <button className={styles.backBtn} onClick={handleBack}>
+                Volver
+              </button>
+              <h2 className={styles.title}>{selected.label}</h2>
+            </div>
+
+            {/* Admin: show assigned ranges summary */}
+            {isAdmin && assignedRanges.length > 0 && (
+              <div className={styles.rangesSection}>
+                <h4 className={styles.rangesTitle}>Rangos asignados</h4>
+                <div className={styles.rangesList}>
+                  {assignedRanges.map((r) => (
+                    <div key={r.id} className={styles.rangeTag}>
+                      <span className={styles.rangeUser}>{r.user}</span>
+                      <span className={styles.rangeValues}>Filas {r.from} - {r.to}</span>
+                      <button
+                        className={styles.rangDeleteBtn}
+                        onClick={() => handleDeleteSibling(r.id)}
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {total > 0 && (
+                  <p className={styles.rangesSummary}>
+                    Total filas: {total} — Asignadas: {assignedRanges.reduce((sum, r) => sum + (r.to - r.from + 1), 0)}
+                    {' '} — Pendientes: {Math.max(0, total - assignedRanges.reduce((sum, r) => sum + (r.to - r.from + 1), 0))}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <FilteredTable
+              rows={rows}
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              loading={loadingRows}
+              setPage={setPage}
+              highlightDiferencia
+              showIndex
+              extraColumns={extraColumns}
+            />
+
+            {/* Admin: assign more analysts */}
+            {isAdmin && (
+              <div className={styles.assignSection}>
+                <h3 className={styles.sectionTitle}>Asignar filas pendientes</h3>
+                <div className={styles.userList}>
+                  {analysts.map((a) => (
+                    <div key={a.id} className={styles.userRow}>
+                      <label className={styles.userItem}>
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.has(a.id)}
+                          onChange={() => toggleUser(a)}
+                        />
+                        <span>{a.nombres} {a.apellidos}</span>
+                        <span className={styles.cedula}>{a.cedula}</span>
+                      </label>
+                      {selectedUsers.has(a.id) && (
+                        <div className={styles.rangeInputs}>
+                          <label className={styles.rangeInputLabel}>
+                            Desde
+                            <input
+                              type="number"
+                              min={1}
+                              max={total}
+                              value={userRanges[a.id]?.from || 1}
+                              onChange={(e) => setRange(a.id, 'from', e.target.value)}
+                              className={styles.rangeInput}
+                            />
+                          </label>
+                          <label className={styles.rangeInputLabel}>
+                            Hasta
+                            <input
+                              type="number"
+                              min={1}
+                              max={total}
+                              value={userRanges[a.id]?.to || total}
+                              onChange={(e) => setRange(a.id, 'to', e.target.value)}
+                              className={styles.rangeInput}
+                            />
+                          </label>
+                          <span className={styles.rangeCount}>
+                            ({Math.max(0, (userRanges[a.id]?.to || total) - (userRanges[a.id]?.from || 1) + 1)} filas)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className={styles.assignBtn}
+                  onClick={handleAssignMore}
+                  disabled={selectedUsers.size === 0 || assigning}
+                >
+                  {assigning ? 'Asignando...' : `Asignar a ${selectedUsers.size} analista(s)`}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {modalRow && (
+        <EvidenceModal
+          evidence={evidences[modalRow.rowIndex]}
+          onSave={handleSaveEvidence}
+          onDelete={handleDeleteEvidence}
+          onClose={() => setModalRow(null)}
+          readOnly={isAdmin}
+        />
+      )}
+    </div>
+  );
+}
