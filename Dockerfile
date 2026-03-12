@@ -8,11 +8,12 @@
 # ---- Stage 1: Build client ----
 FROM node:20-alpine AS client-build
 
+ARG VITE_BASE_PATH=/
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
 COPY client/ ./
-RUN npm run build
+RUN VITE_BASE_PATH=${VITE_BASE_PATH} npm run build
 
 # ---- Stage 2: Production server ----
 # Use Debian-based image — required for Puppeteer/Chromium
