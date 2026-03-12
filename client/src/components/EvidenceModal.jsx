@@ -10,6 +10,13 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
   const [saving, setSaving] = useState(false);
   const dropRef = useRef(null);
 
+  function imageTransform(deg) {
+    const isVertical = deg % 180 !== 0;
+    return isVertical
+      ? `rotate(${deg}deg) scale(0.65)`
+      : `rotate(${deg}deg)`;
+  }
+
   // Listen for paste events (only in edit mode)
   useEffect(() => {
     if (readOnly) return;
@@ -100,7 +107,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
                   src={evidence.image_data}
                   alt="Evidencia"
                   className={styles.image}
-                  style={{ transform: `rotate(${evidence.rotation || 0}deg)` }}
+                  style={{ transform: imageTransform(evidence.rotation || 0) }}
                 />
               </div>
               {evidence.observations && (
@@ -135,7 +142,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
               src={imageData}
               alt="Evidencia"
               className={styles.image}
-              style={{ transform: `rotate(${rotation}deg)` }}
+              style={{ transform: imageTransform(rotation) }}
             />
           </div>
 
@@ -187,7 +194,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
                 src={imageData}
                 alt="Evidencia"
                 className={styles.image}
-                style={{ transform: `rotate(${rotation}deg)` }}
+                style={{ transform: imageTransform(rotation) }}
               />
               <div className={styles.rotateControls}>
                 <button onClick={rotateLeft} className={styles.rotateBtn}>Rotar izq.</button>
