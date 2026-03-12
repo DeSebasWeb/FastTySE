@@ -156,16 +156,30 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
 
           <ImageViewer src={imageData} rotation={rotation} size="large" />
 
-          {observations && (
-            <div className={styles.field}>
-              <label className={styles.label}>Observaciones</label>
-              <p className={styles.obsText}>{observations}</p>
-            </div>
-          )}
+          <div className={styles.field}>
+            <label className={styles.label}>Observaciones</label>
+            <textarea
+              value={observations}
+              onChange={(e) => setObservations(e.target.value)}
+              className={styles.textarea}
+              rows={2}
+              placeholder="Notas adicionales..."
+            />
+          </div>
 
           <div className={styles.actions}>
-            <button className={styles.saveBtn} onClick={() => setEditing(true)}>
-              Actualizar
+            <button
+              className={styles.saveBtn}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await onSave({ status: 'uploaded', imageData, rotation, observations: observations || null });
+                  onClose();
+                } catch (err) { console.error(err); } finally { setSaving(false); }
+              }}
+              disabled={saving}
+            >
+              {saving ? 'Guardando...' : 'Guardar cambios'}
             </button>
             <button className={styles.deleteEvidenceBtn} onClick={handleDelete} disabled={saving}>
               {saving ? 'Eliminando...' : 'Eliminar evidencia'}
