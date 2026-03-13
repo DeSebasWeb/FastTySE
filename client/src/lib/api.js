@@ -148,3 +148,10 @@ export async function deleteEvidence(id) {
   const res = await api.delete(`/evidences/${id}`);
   return res.data;
 }
+
+// --- E14 Auto-load API ---
+
+export async function autoLoadE14(rowData) {
+  const res = await api.post('/e14/auto-load', rowData);
+  return res.data;
+}

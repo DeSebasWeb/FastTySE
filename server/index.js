@@ -14,6 +14,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import authRoutes from './routes/auth.js';
 import assignmentRoutes from './routes/assignments.js';
 import evidenceRoutes from './routes/evidences.js';
+import e14Routes from './routes/e14.js';
 
 const PORT = process.env.PORT || 3001;
 
@@ -68,6 +69,7 @@ async function start() {
   app.use('/api', dashboardRoutes);
   app.use('/api', assignmentRoutes);
   app.use('/api', evidenceRoutes);
+  app.use('/api/e14', e14Routes);
 
   // Serve React build in production
   const clientDist = resolve(__dirname, '../client/dist');

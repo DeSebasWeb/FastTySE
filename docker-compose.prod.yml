@@ -12,5 +12,6 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       EXTERNAL_DB_URL: ${EXTERNAL_DB_URL}
       JWT_SECRET: ${JWT_SECRET}
+      AUDITOR_BASE_URL: ${AUDITOR_BASE_URL:-}
       NODE_ENV: production
       PORT: 3001

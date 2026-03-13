@@ -104,9 +104,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   margin-bottom: 0.75rem;
 }
 
@@ -123,9 +120,13 @@
 }
 
 .imageInner {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  min-width: 100%;
   padding: 1rem;
-  flex-shrink: 0;
+  width: fit-content;
 }
 
 .image {
@@ -311,4 +312,47 @@
   font-size: 0.78rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* Annotate image button */
+.annotateBtn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.annotateBtn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Auto E14 feedback */
+.autoE14Loading {
+  color: var(--accent);
+  font-size: 0.85rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.autoE14Error {
+  color: #e67e22;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.autoE14Label {
+  font-size: 0.72rem;
+  color: #27ae60;
+  text-align: center;
+  margin-bottom: 0.3rem;
 }

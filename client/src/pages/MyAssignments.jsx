@@ -707,6 +707,7 @@ export default function MyAssignments() {
       {modalRow && (
         <EvidenceModal
           evidence={evidences[modalRow.rowIndex]}
+          row={modalRow.row}
           onSave={handleSaveEvidence}
           onDelete={handleDeleteEvidence}
           onClose={() => setModalRow(null)}

@@ -1,18 +1,51 @@
 import { useState, useRef, useEffect } from 'react';
 import styles from './EvidenceModal.module.css';
+import ImageAnnotator from './ImageAnnotator';
+import { autoLoadE14 } from '../lib/api';
 
 function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRight, extraTools }) {
   const [zoom, setZoom] = useState(1);
+  const [fitZoom, setFitZoom] = useState(1);
+  const containerRef = useRef(null);
+
+  const [naturalSize, setNaturalSize] = useState(null);
+
+  // Auto-fit: calculate zoom so image fits inside the viewer container
+  useEffect(() => {
+    if (!src) return;
+    const img = new Image();
+    img.onload = () => {
+      setNaturalSize({ w: img.width, h: img.height });
+      const container = containerRef.current;
+      if (!container) return;
+      const swap = rotation === 90 || rotation === 270;
+      const imgW = swap ? img.height : img.width;
+      const imgH = swap ? img.width : img.height;
+      const pad = 32;
+      const cW = container.clientWidth - pad;
+      const cH = container.clientHeight - pad;
+      if (imgW > cW || imgH > cH) {
+        const fit = Math.min(cW / imgW, cH / imgH);
+        setZoom(fit);
+        setFitZoom(fit);
+      } else {
+        setZoom(1);
+        setFitZoom(1);
+      }
+    };
+    img.src = src;
+  }, [src, rotation]);
 
   const viewerClass = size === 'large' ? styles.imageViewerLarge : styles.imageViewerSmall;
 
   return (
     <>
       <div className={styles.toolbar}>
-        <button className={styles.toolBtn} onClick={() => setZoom((z) => Math.max(0.15, z / 1.3))}>-</button>
+        <button className={styles.toolBtn} onClick={() => setZoom((z) => Math.max(0.05, z / 1.3))}>-</button>
         <span className={styles.toolLabel}>{Math.round(zoom * 100)}%</span>
         <button className={styles.toolBtn} onClick={() => setZoom((z) => Math.min(5, z * 1.3))}>+</button>
-        <button className={styles.toolBtn} onClick={() => setZoom(1)}>Reset</button>
+        <button className={styles.toolBtn} onClick={() => setZoom(fitZoom)}>Ajustar</button>
+        <button className={styles.toolBtn} onClick={() => setZoom(1)}>100%</button>
         {showRotate && (
           <>
             <span className={styles.toolSep} />
@@ -22,13 +55,18 @@ function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRi
         )}
         {extraTools}
       </div>
-      <div className={viewerClass}>
+      <div className={viewerClass} ref={containerRef}>
         <div className={styles.imageInner}>
           <img
             src={src}
             alt="Evidencia"
             className={styles.image}
-            style={{ transform: `rotate(${rotation}deg) scale(${zoom})`, transformOrigin: 'center center' }}
+            style={naturalSize ? {
+              width: naturalSize.w * zoom,
+              height: naturalSize.h * zoom,
+              transform: rotation ? `rotate(${rotation}deg)` : undefined,
+              transformOrigin: 'center center',
+            } : { transform: rotation ? `rotate(${rotation}deg)` : undefined }}
           />
         </div>
       </div>
@@ -36,13 +74,17 @@ function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRi
   );
 }
 
-export default function EvidenceModal({ evidence, onSave, onDelete, onClose, readOnly, rowLabel, onPrev, onNext }) {
+export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose, readOnly, rowLabel, onPrev, onNext }) {
   const hasExisting = evidence?.status === 'uploaded';
   const [editing, setEditing] = useState(!hasExisting);
   const [imageData, setImageData] = useState(evidence?.image_data || null);
   const [rotation, setRotation] = useState(evidence?.rotation || 0);
   const [observations, setObservations] = useState(evidence?.observations || '');
   const [saving, setSaving] = useState(false);
+  const [showAnnotator, setShowAnnotator] = useState(false);
+  const [autoE14Status, setAutoE14Status] = useState('idle'); // idle | loading | done | error
+  const autoE14StatusRef = useRef('idle');
+  const [autoE14Label, setAutoE14Label] = useState('');
   const dropRef = useRef(null);
 
   // Reset state when evidence changes (navigation)
@@ -51,7 +93,56 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
     setImageData(evidence?.image_data || null);
     setRotation(evidence?.rotation || 0);
     setObservations(evidence?.observations || '');
+    setAutoE14Status('idle');
+    autoE14StatusRef.current = 'idle';
+    setAutoE14Label('');
   }, [evidence?.id, evidence?.row_index, rowLabel]);
+
+  // Auto-load E14 when opening in edit mode without existing image
+  // Use rowLabel as stable dependency instead of row object (new ref each render)
+  const rowRef = useRef(row);
+  rowRef.current = row;
+
+  useEffect(() => {
+    if (readOnly || !editing || imageData || hasExisting) return;
+    if (autoE14StatusRef.current !== 'idle') return;
+    const r = rowRef.current;
+    if (!r?.nomDepartamento || !r?.nomMunicipio || !r?.mesa) return;
+
+    let cancelled = false;
+    setAutoE14Status('loading');
+    autoE14StatusRef.current = 'loading';
+
+    autoLoadE14({
+      nomCorporacion: r.nomCorporacion || '',
+      nomDepartamento: r.nomDepartamento,
+      nomMunicipio: r.nomMunicipio,
+      zona: r.zona || '',
+      nomPuesto: r.nomPuesto || '',
+      codPuesto: r.codPuesto || '',
+      mesa: r.mesa,
+      codLista: r.codLista || '',
+    }).then((data) => {
+      if (cancelled) return;
+      if (data.success) {
+        setImageData(data.imagen_base64);
+        setAutoE14Label(data.label);
+        setAutoE14Status('done');
+        autoE14StatusRef.current = 'done';
+      } else {
+        setAutoE14Label(data.message || '');
+        setAutoE14Status('error');
+        autoE14StatusRef.current = 'error';
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setAutoE14Status('error');
+        autoE14StatusRef.current = 'error';
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [editing, readOnly, imageData, hasExisting, rowLabel]);
 
   useEffect(() => {
     if (readOnly) return;
@@ -92,6 +183,28 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
 
   function rotateLeft() { setRotation((r) => (r - 90 + 360) % 360); }
   function rotateRight() { setRotation((r) => (r + 90) % 360); }
+
+  function openAnnotator() {
+    if (rotation !== 0) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const swap = rotation === 90 || rotation === 270;
+        canvas.width = swap ? img.height : img.width;
+        canvas.height = swap ? img.width : img.height;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        setImageData(canvas.toDataURL('image/png'));
+        setRotation(0);
+        setShowAnnotator(true);
+      };
+      img.src = imageData;
+    } else {
+      setShowAnnotator(true);
+    }
+  }
 
   async function handleSave(status) {
     setSaving(true);
@@ -186,6 +299,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
           </div>
 
           <div className={styles.actions}>
+            <button className={styles.annotateBtn} onClick={() => { setEditing(true); openAnnotator(); }}>Anotar imagen</button>
             <button
               className={styles.saveBtn}
               onClick={async () => {
@@ -230,10 +344,16 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
               extraTools={
                 <>
                   <span className={styles.toolSep} />
+                  <button className={styles.annotateBtn} onClick={openAnnotator}>Anotar imagen</button>
+                  <span className={styles.toolSep} />
                   <button className={styles.toolBtn} onClick={() => setImageData(null)} style={{ color: 'var(--danger)' }}>Quitar</button>
                 </>
               }
             />
+
+            {autoE14Label && autoE14Status === 'done' && (
+              <p className={styles.autoE14Label}>{autoE14Label}</p>
+            )}
 
             <div
               ref={dropRef}
@@ -258,11 +378,20 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
             onDrop={handleDrop}
           >
             <div className={styles.placeholder}>
-              <p>Arrastra una imagen, pega con Ctrl+V, o</p>
-              <label className={styles.fileLabel}>
-                Seleccionar archivo
-                <input type="file" accept="image/*" onChange={handleFileSelect} hidden />
-              </label>
+              {autoE14Status === 'loading' ? (
+                <p className={styles.autoE14Loading}>Buscando E14...</p>
+              ) : (
+                <>
+                  {autoE14Status === 'error' && autoE14Label && (
+                    <p className={styles.autoE14Error}>{autoE14Label}</p>
+                  )}
+                  <p>Arrastra una imagen, pega con Ctrl+V, o</p>
+                  <label className={styles.fileLabel}>
+                    Seleccionar archivo
+                    <input type="file" accept="image/*" onChange={handleFileSelect} hidden />
+                  </label>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -300,6 +429,18 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
             </button>
           )}
         </div>
+
+        {showAnnotator && imageData && (
+          <ImageAnnotator
+            imageSrc={imageData}
+            onApply={(base64) => {
+              setImageData(base64);
+              setRotation(0);
+              setShowAnnotator(false);
+            }}
+            onCancel={() => setShowAnnotator(false)}
+          />
+        )}
       </div>
     </div>
   );
