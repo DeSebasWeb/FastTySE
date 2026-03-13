@@ -62,7 +62,7 @@ router.get('/dashboard/stats', async (req, res) => {
          SUM(CASE WHEN (row_data->>'Diferencia')::numeric > 0
              THEN (row_data->>'Diferencia')::numeric ELSE 0 END) AS votos_ganados
        FROM csv_rows
-       WHERE 1=1 ${where.text}
+       WHERE completed = FALSE ${where.text}
        GROUP BY row_data->>'nomCorporacion'`,
       where.values
     );
@@ -104,37 +104,37 @@ router.get('/dashboard/filter-options', async (req, res) => {
       await Promise.all([
         pool.query(
           `SELECT DISTINCT row_data->>'nomCorporacion' AS v FROM csv_rows
-           WHERE 1=1 ${corpWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${corpWhere.text} ORDER BY v`,
           corpWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomDepartamento' AS v FROM csv_rows
-           WHERE 1=1 ${deptWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${deptWhere.text} ORDER BY v`,
           deptWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomMunicipio' AS v FROM csv_rows
-           WHERE 1=1 ${muniWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${muniWhere.text} ORDER BY v`,
           muniWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'zona' AS v FROM csv_rows
-           WHERE 1=1 ${restWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'codPuesto' AS v FROM csv_rows
-           WHERE 1=1 ${restWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'mesa' AS v FROM csv_rows
-           WHERE 1=1 ${restWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomLista' AS v FROM csv_rows
-           WHERE 1=1 ${restWhere.text} ORDER BY v`,
+           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
       ]);
@@ -167,14 +167,14 @@ router.get('/dashboard/rows', async (req, res) => {
     const [rowsResult, countResult] = await Promise.all([
       pool.query(
         `SELECT row_data FROM csv_rows
-         WHERE 1=1 ${where.text}
+         WHERE completed = FALSE ${where.text}
          ORDER BY row_index
          LIMIT $${p} OFFSET $${p + 1}`,
         [...where.values, limit, offset]
       ),
       pool.query(
         `SELECT COUNT(*) AS total FROM csv_rows
-         WHERE 1=1 ${where.text}`,
+         WHERE completed = FALSE ${where.text}`,
         where.values
       ),
     ]);
@@ -244,7 +244,7 @@ router.get('/dashboard/rows/csv', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT row_data FROM csv_rows WHERE 1=1 ${where.text}${extraCondition} ORDER BY row_index`,
+      `SELECT row_data FROM csv_rows WHERE completed = FALSE ${where.text}${extraCondition} ORDER BY row_index`,
       where.values
     );
 
@@ -310,7 +310,7 @@ router.post('/dashboard/multi-rows/csv', async (req, res) => {
       }
 
       const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE ${where}`);
+      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
     }
 
     const combined = unionParts.join(' UNION ');
@@ -385,7 +385,7 @@ router.post('/dashboard/multi-rows', async (req, res) => {
       }
 
       const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE ${where}`);
+      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
     }
 
     const combined = unionParts.join(' UNION ');
