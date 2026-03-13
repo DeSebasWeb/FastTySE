@@ -564,9 +564,12 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
 // ---- Shared helpers for CSV / Excel export ----
 const EXPORT_COLUMNS = [
   { field: 'nomCorporacion', label: 'Corporacion' },
+  { field: 'codDepartamento', label: 'Cod. Depto' },
   { field: 'nomDepartamento', label: 'Departamento' },
+  { field: 'codMunicipio', label: 'Cod. Municipio' },
   { field: 'nomMunicipio', label: 'Municipio' },
   { field: 'zona', label: 'Zona' },
+  { field: 'codPuesto', label: 'Cod. Puesto' },
   { field: 'nomPuesto', label: 'Puesto' },
   { field: 'mesa', label: 'Mesa' },
   { field: 'codLista', label: 'Cod. Lista' },

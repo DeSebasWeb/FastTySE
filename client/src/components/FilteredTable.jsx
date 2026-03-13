@@ -7,10 +7,10 @@ import {
 import styles from './DataTable.module.css';
 
 const TABLE_COLUMNS = [
-  { key: 'nomDepartamento', label: 'Depto' },
-  { key: 'nomMunicipio', label: 'Municipio' },
+  { key: 'nomDepartamento', label: 'Depto', codKey: 'codDepartamento' },
+  { key: 'nomMunicipio', label: 'Municipio', codKey: 'codMunicipio' },
   { key: 'zona', label: 'Zona' },
-  { key: 'nomPuesto', label: 'Puesto' },
+  { key: 'nomPuesto', label: 'Puesto', codKey: 'codPuesto' },
   { key: 'mesa', label: 'Mesa' },
   { key: 'codLista', label: 'Cod. Lista' },
   { key: 'nomLista', label: 'Partido' },
@@ -43,7 +43,7 @@ export default function FilteredTable({
       });
     }
 
-    for (const { key, label } of TABLE_COLUMNS) {
+    for (const { key, label, codKey } of TABLE_COLUMNS) {
       cols.push({
         accessorKey: key,
         header: label,
@@ -54,6 +54,15 @@ export default function FilteredTable({
             const color = n > 0 ? 'var(--success)' : n < 0 ? 'var(--danger)' : 'inherit';
             const arrow = n > 0 ? '\u25B2' : n < 0 ? '\u25BC' : '';
             return <span style={{ color, fontWeight: 600 }}>{arrow} {val}</span>;
+          }
+          if (codKey) {
+            const cod = info.row.original[codKey];
+            return (
+              <span>
+                {cod != null && <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem', marginRight: 3 }}>{cod}</span>}
+                {val ?? ''}
+              </span>
+            );
           }
           return val ?? '';
         },

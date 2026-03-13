@@ -195,9 +195,12 @@ router.get('/dashboard/rows', async (req, res) => {
 // CSV: map of JSON field -> CSV header label
 const CSV_COLUMNS = [
   { field: 'nomCorporacion', label: 'Corporacion' },
+  { field: 'codDepartamento', label: 'Cod. Depto' },
   { field: 'nomDepartamento', label: 'Departamento' },
+  { field: 'codMunicipio', label: 'Cod. Municipio' },
   { field: 'nomMunicipio', label: 'Municipio' },
   { field: 'zona', label: 'Zona' },
+  { field: 'codPuesto', label: 'Cod. Puesto' },
   { field: 'nomPuesto', label: 'Puesto' },
   { field: 'mesa', label: 'Mesa' },
   { field: 'codLista', label: 'Cod. Lista' },
