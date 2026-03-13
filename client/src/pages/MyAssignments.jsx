@@ -192,7 +192,7 @@ export default function MyAssignments() {
   async function handleDownloadSinglePdf(assignmentId, rowIndex) {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/assignments/${assignmentId}/report/${rowIndex}`, {
+      const res = await fetch(`${import.meta.env.BASE_URL}api/assignments/${assignmentId}/report/${rowIndex}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -218,7 +218,7 @@ export default function MyAssignments() {
     setGeneratingReport(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`/api/assignments/${selected.id}/report`, {
+      const res = await fetch(`${import.meta.env.BASE_URL}api/assignments/${selected.id}/report`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
