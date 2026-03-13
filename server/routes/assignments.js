@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import puppeteer from 'puppeteer';
+import ExcelJS from 'exceljs';
 
 const router = Router();
 
@@ -147,6 +148,7 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
 
     // Optional fecha filter — passed as ?fecha=2026-03-08
     const fechaFilter = req.query.fecha || null;
+    const noReclamar = req.query.noReclamar === '1';
 
     // Get evidences with status = 'uploaded' for this assignment
     const evResult = await pool.query(
@@ -221,11 +223,16 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
 
     function getTitle(row) {
       const corp = (row.nomCorporacion || '').toUpperCase().includes('SENADO') ? 'SENADO' : 'CÁMARA';
+      if (noReclamar) return `INVESTIGACIÓN - ${corp} 2026`;
       const dif = Number(row['Diferencia'] || 0);
       if (dif < 0) return `RECLAMACIÓN POR FALTA DE VOTOS - ${corp} 2026`;
       if (dif === 0) return `RECLAMACIÓN POR VOTACIÓN EN CERO - ${corp} 2026`;
       return `RECLAMACIÓN POR EXCESO DE VOTOS - ${corp} 2026`;
     }
+
+    const noReclamarBanner = noReclamar
+      ? `<div style="background:#c0392b;color:#fff;text-align:center;padding:8px 0;font-size:20px;font-weight:900;letter-spacing:1px;border-radius:4px;margin-bottom:8px;">OJO — NO ES RECLAMACIÓN — PARA CUIDAR</div>`
+      : '';
 
     function escapeHtml(str) {
       return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -252,53 +259,52 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
         : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
 
       const rotation = ev.rotation || 0;
-      const isRotated = rotation === 90 || rotation === 270;
-      const imgStyle = rotation
-        ? `transform:rotate(${rotation}deg);max-width:${isRotated ? '70%' : '100%'};object-fit:contain;`
-        : `max-width:100%;object-fit:contain;`;
+      const rotStyle = rotation ? `transform:rotate(${rotation}deg);` : '';
 
       pages.push(`
         <div class="page">
-          <h1 class="report-title">${escapeHtml(title)}</h1>
-          <hr class="title-line"/>
-          <div class="date-row">Fecha: ${fecha}</div>
+          <div class="header-section">
+            ${noReclamarBanner}
+            <h1 class="report-title">${escapeHtml(title)}</h1>
+            <hr class="title-line"/>
+            <div class="date-row">Fecha: ${fecha}</div>
+            <table class="info-table">
+              <thead>
+                <tr>
+                  <th>Departamento</th>
+                  <th>Municipio</th>
+                  <th>Zona</th>
+                  <th>Puesto</th>
+                  <th>Mesa</th>
+                  <th>Partido</th>
+                  <th>Candidato</th>
+                  <th>E14</th>
+                  <th>Votos Escrutinio<br/>(MMV)</th>
+                  <th>Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>${escapeHtml(row.nomDepartamento)}</td>
+                  <td>${escapeHtml(row.nomMunicipio)}</td>
+                  <td>${escapeHtml(row.zona)}</td>
+                  <td>${escapeHtml(row.nomPuesto)}</td>
+                  <td>${escapeHtml(row.mesa)}</td>
+                  <td>${escapeHtml(row.nomLista)}</td>
+                  <td>${escapeHtml(row.candidato)}</td>
+                  <td>${escapeHtml(row['Votos E14'])}</td>
+                  <td>${escapeHtml(row['Votos MMV'])}</td>
+                  <td>${difLabel}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="section-title">1. Evidencias Documentales</div>
+            <div class="formulario-label">Formulario E-14</div>
+            <hr class="blue-line"/>
+          </div>
 
-          <table class="info-table">
-            <thead>
-              <tr>
-                <th>Departamento</th>
-                <th>Municipio</th>
-                <th>Zona</th>
-                <th>Puesto</th>
-                <th>Mesa</th>
-                <th>Partido</th>
-                <th>Candidato</th>
-                <th>E14</th>
-                <th>Votos Escrutinio<br/>(MMV)</th>
-                <th>Diferencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(row.nomDepartamento)}</td>
-                <td>${escapeHtml(row.nomMunicipio)}</td>
-                <td>${escapeHtml(row.zona)}</td>
-                <td>${escapeHtml(row.nomPuesto)}</td>
-                <td>${escapeHtml(row.mesa)}</td>
-                <td>${escapeHtml(row.nomLista)}</td>
-                <td>${escapeHtml(row.candidato)}</td>
-                <td>${escapeHtml(row['Votos E14'])}</td>
-                <td>${escapeHtml(row['Votos MMV'])}</td>
-                <td>${difLabel}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="section-title">1. Evidencias Documentales</div>
-          <div class="formulario-label">Formulario E-14</div>
-          <hr class="blue-line"/>
-          <div class="image-wrap" style="${isRotated ? 'min-height:400px;display:flex;align-items:center;justify-content:center;' : ''}">
-            <img src="${ev.image_data}" style="${imgStyle}" alt="Formulario E-14"/>
+          <div class="image-section">
+            <img src="${ev.image_data}" style="${rotStyle}" alt="Formulario E-14"/>
           </div>
 
           ${ev.observations ? `
@@ -328,26 +334,44 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
   <meta charset="UTF-8"/>
   <title>Informe de Reclamaciones</title>
   <style>
+    @page { size: A4; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
-    .page { width: 100%; padding: 20mm 18mm; page-break-after: always; }
-    .report-title { font-size: 18px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 8px; }
-    .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 10px; }
-    .date-row { text-align: right; font-size: 11px; color: #555; margin-bottom: 14px; }
-    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; table-layout: fixed; }
-    .info-table th { background: #2c3e6b; color: #fff; padding: 6px 4px; text-align: center; font-size: 10px; border: 1px solid #2c3e6b; word-wrap: break-word; }
-    .info-table td { padding: 8px 4px; text-align: center; border: 1px solid #ccc; font-size: 10px; vertical-align: middle; word-wrap: break-word; }
-    .section-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; clear: both; }
-    .formulario-label { color: #2980b9; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
-    .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 14px; }
-    .image-wrap { text-align: center; margin-bottom: 18px; clear: both; display: block; }
-    .image-wrap img { border: 1px solid #ddd; border-radius: 4px; display: block; margin: 0 auto; max-width: 100%; height: auto; }
-    .obs-section { margin-top: 18px; }
-    .obs-title { font-weight: 700; font-size: 13px; color: #555; margin-bottom: 4px; }
-    .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 10px; }
-    .obs-content { display: flex; align-items: flex-start; gap: 10px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; }
-    .obs-bar { width: 4px; min-height: 30px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
-    .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+    .page {
+      width: 210mm; height: 297mm;
+      padding: 12mm 14mm 10mm 14mm;
+      page-break-after: always;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .page:last-child { page-break-after: avoid; }
+    .header-section { flex-shrink: 0; }
+    .report-title { font-size: 16px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 6px; }
+    .date-row { text-align: right; font-size: 10px; color: #555; margin-bottom: 8px; }
+    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+    .info-table th { background: #2c3e6b; color: #fff; padding: 4px 3px; text-align: center; font-size: 9px; border: 1px solid #2c3e6b; word-wrap: break-word; }
+    .info-table td { padding: 5px 3px; text-align: center; border: 1px solid #ccc; font-size: 9px; vertical-align: middle; word-wrap: break-word; }
+    .section-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+    .formulario-label { color: #2980b9; font-weight: 700; font-size: 12px; margin-bottom: 3px; }
+    .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 6px; }
+    .image-section {
+      flex: 1; min-height: 0;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .image-section img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+      border: 1px solid #ddd; border-radius: 4px;
+      display: block;
+    }
+    .obs-section { flex-shrink: 0; margin-top: 6px; }
+    .obs-title { font-weight: 700; font-size: 11px; color: #555; margin-bottom: 3px; }
+    .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 6px; }
+    .obs-content { display: flex; align-items: flex-start; gap: 8px; background: #f5f5f5; padding: 6px 10px; border-radius: 4px; font-size: 10px; }
+    .obs-bar { width: 3px; min-height: 20px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
+    .footer { flex-shrink: 0; margin-top: 6px; text-align: center; font-size: 9px; color: #888; border-top: 1px solid #eee; padding-top: 4px; }
   </style>
 </head>
 <body>
@@ -385,6 +409,7 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
   try {
     const { assignmentId, rowIndex } = req.params;
     const rn = Number(rowIndex);
+    const noReclamar = req.query.noReclamar === '1';
 
     const assignResult = await pool.query(`SELECT * FROM assignments WHERE id = $1`, [assignmentId]);
     if (assignResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -432,7 +457,9 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
     const fecha = now.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric', ...tzOpts });
     const corp = (row.nomCorporacion || '').toUpperCase().includes('SENADO') ? 'SENADO' : 'CÁMARA';
     const dif = Number(row['Diferencia'] || 0);
-    const title = dif < 0 ? `RECLAMACIÓN POR FALTA DE VOTOS - ${corp} 2026`
+    const title = noReclamar
+      ? `INVESTIGACIÓN - ${corp} 2026`
+      : dif < 0 ? `RECLAMACIÓN POR FALTA DE VOTOS - ${corp} 2026`
       : dif === 0 ? `RECLAMACIÓN POR VOTACIÓN EN CERO - ${corp} 2026`
       : `RECLAMACIÓN POR EXCESO DE VOTOS - ${corp} 2026`;
     const difColor = dif < 0 ? '#c0392b' : dif > 0 ? '#27ae60' : '#e67e22';
@@ -441,52 +468,72 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
       : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
     const escapeHtml = (str) => String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const rotation = ev.rotation || 0;
-    const isRotated = rotation === 90 || rotation === 270;
-    const imgStyle = rotation
-      ? `transform:rotate(${rotation}deg);max-width:${isRotated ? '70%' : '100%'};object-fit:contain;`
-      : `max-width:100%;object-fit:contain;`;
+    const rotStyle = rotation ? `transform:rotate(${rotation}deg);` : '';
+
+    const noReclamarBanner = noReclamar
+      ? `<div style="background:#c0392b;color:#fff;text-align:center;padding:8px 0;font-size:20px;font-weight:900;letter-spacing:1px;border-radius:4px;margin-bottom:8px;">OJO — NO ES RECLAMACIÓN — PARA CUIDAR</div>`
+      : '';
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
 <style>
+  @page { size: A4; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
-  .page { width: 100%; padding: 20mm 18mm; }
-  .report-title { font-size: 18px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 8px; }
-  .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 10px; }
-  .date-row { text-align: right; font-size: 11px; color: #555; margin-bottom: 14px; }
-  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; table-layout: fixed; }
-  .info-table th { background: #2c3e6b; color: #fff; padding: 6px 4px; text-align: center; font-size: 10px; border: 1px solid #2c3e6b; word-wrap: break-word; }
-  .info-table td { padding: 8px 4px; text-align: center; border: 1px solid #ccc; font-size: 10px; vertical-align: middle; word-wrap: break-word; }
-  .section-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; clear: both; }
-  .formulario-label { color: #2980b9; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
-  .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 14px; }
-  .image-wrap { text-align: center; margin-bottom: 18px; clear: both; display: block; }
-  .image-wrap img { border: 1px solid #ddd; border-radius: 4px; display: block; margin: 0 auto; max-width: 100%; height: auto; }
-  .obs-section { margin-top: 18px; }
-  .obs-title { font-weight: 700; font-size: 13px; color: #555; margin-bottom: 4px; }
-  .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 10px; }
-  .obs-content { display: flex; align-items: flex-start; gap: 10px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; }
-  .obs-bar { width: 4px; min-height: 30px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
-  .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+  .page {
+    width: 210mm; height: 297mm;
+    padding: 12mm 14mm 10mm 14mm;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .header-section { flex-shrink: 0; }
+  .report-title { font-size: 16px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 6px; }
+  .date-row { text-align: right; font-size: 10px; color: #555; margin-bottom: 8px; }
+  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+  .info-table th { background: #2c3e6b; color: #fff; padding: 4px 3px; text-align: center; font-size: 9px; border: 1px solid #2c3e6b; word-wrap: break-word; }
+  .info-table td { padding: 5px 3px; text-align: center; border: 1px solid #ccc; font-size: 9px; vertical-align: middle; word-wrap: break-word; }
+  .section-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+  .formulario-label { color: #2980b9; font-weight: 700; font-size: 12px; margin-bottom: 3px; }
+  .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 6px; }
+  .image-section {
+    flex: 1; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .image-section img {
+    max-width: 100%; max-height: 100%;
+    object-fit: contain;
+    border: 1px solid #ddd; border-radius: 4px;
+    display: block;
+  }
+  .obs-section { flex-shrink: 0; margin-top: 6px; }
+  .obs-title { font-weight: 700; font-size: 11px; color: #555; margin-bottom: 3px; }
+  .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 6px; }
+  .obs-content { display: flex; align-items: flex-start; gap: 8px; background: #f5f5f5; padding: 6px 10px; border-radius: 4px; font-size: 10px; }
+  .obs-bar { width: 3px; min-height: 20px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
+  .footer { flex-shrink: 0; margin-top: 6px; text-align: center; font-size: 9px; color: #888; border-top: 1px solid #eee; padding-top: 4px; }
 </style></head><body>
 <div class="page">
-  <h1 class="report-title">${escapeHtml(title)}</h1>
-  <hr class="title-line"/>
-  <div class="date-row">Fecha: ${fecha}</div>
-  <table class="info-table"><thead><tr>
-    <th>Departamento</th><th>Municipio</th><th>Zona</th><th>Puesto</th><th>Mesa</th>
-    <th>Partido</th><th>Candidato</th><th>E14</th><th>Votos Escrutinio<br/>(MMV)</th><th>Diferencia</th>
-  </tr></thead><tbody><tr>
-    <td>${escapeHtml(row.nomDepartamento)}</td><td>${escapeHtml(row.nomMunicipio)}</td>
-    <td>${escapeHtml(row.zona)}</td><td>${escapeHtml(row.nomPuesto)}</td><td>${escapeHtml(row.mesa)}</td>
-    <td>${escapeHtml(row.nomLista)}</td><td>${escapeHtml(row.candidato)}</td>
-    <td>${escapeHtml(row['Votos E14'])}</td><td>${escapeHtml(row['Votos MMV'])}</td><td>${difLabel}</td>
-  </tr></tbody></table>
-  <div class="section-title">1. Evidencias Documentales</div>
-  <div class="formulario-label">Formulario E-14</div>
-  <hr class="blue-line"/>
-  <div class="image-wrap" style="${isRotated ? 'min-height:400px;display:flex;align-items:center;justify-content:center;' : ''}">
-    <img src="${ev.image_data}" style="${imgStyle}" alt="Formulario E-14"/>
+  <div class="header-section">
+    ${noReclamarBanner}
+    <h1 class="report-title">${escapeHtml(title)}</h1>
+    <hr class="title-line"/>
+    <div class="date-row">Fecha: ${fecha}</div>
+    <table class="info-table"><thead><tr>
+      <th>Departamento</th><th>Municipio</th><th>Zona</th><th>Puesto</th><th>Mesa</th>
+      <th>Partido</th><th>Candidato</th><th>E14</th><th>Votos Escrutinio<br/>(MMV)</th><th>Diferencia</th>
+    </tr></thead><tbody><tr>
+      <td>${escapeHtml(row.nomDepartamento)}</td><td>${escapeHtml(row.nomMunicipio)}</td>
+      <td>${escapeHtml(row.zona)}</td><td>${escapeHtml(row.nomPuesto)}</td><td>${escapeHtml(row.mesa)}</td>
+      <td>${escapeHtml(row.nomLista)}</td><td>${escapeHtml(row.candidato)}</td>
+      <td>${escapeHtml(row['Votos E14'])}</td><td>${escapeHtml(row['Votos MMV'])}</td><td>${difLabel}</td>
+    </tr></tbody></table>
+    <div class="section-title">1. Evidencias Documentales</div>
+    <div class="formulario-label">Formulario E-14</div>
+    <hr class="blue-line"/>
+  </div>
+  <div class="image-section">
+    <img src="${ev.image_data}" style="${rotStyle}" alt="Formulario E-14"/>
   </div>
   ${ev.observations ? `<div class="obs-section"><div class="obs-title">Observaciones</div><hr class="obs-line"/>
   <div class="obs-content"><div class="obs-bar"></div><span>${escapeHtml(ev.observations)}</span></div></div>` : ''}
@@ -511,6 +558,150 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
   } catch (err) {
     console.error('Single row report error:', err);
     res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// ---- Shared helpers for CSV / Excel export ----
+const EXPORT_COLUMNS = [
+  { field: 'nomCorporacion', label: 'Corporacion' },
+  { field: 'nomDepartamento', label: 'Departamento' },
+  { field: 'nomMunicipio', label: 'Municipio' },
+  { field: 'zona', label: 'Zona' },
+  { field: 'nomPuesto', label: 'Puesto' },
+  { field: 'mesa', label: 'Mesa' },
+  { field: 'codLista', label: 'Cod. Lista' },
+  { field: 'nomLista', label: 'Partido' },
+  { field: 'codCandidato', label: 'Cod. Candidato' },
+  { field: 'candidato', label: 'Candidato' },
+  { field: 'Votos E14', label: 'Votos E14' },
+  { field: 'Votos MMV', label: 'Votos MMV' },
+  { field: 'Diferencia', label: 'Diferencia' },
+];
+
+function escapeCsvCell(val) {
+  const s = String(val ?? '');
+  return s.includes(',') || s.includes('"') || s.includes('\n') || s.includes(';')
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
+}
+
+async function getAssignmentRows(assignmentId, { applyRange = true } = {}) {
+  const assignResult = await pool.query(`SELECT * FROM assignments WHERE id = $1`, [assignmentId]);
+  if (assignResult.rows.length === 0) return null;
+  const assignment = assignResult.rows[0];
+
+  const filters = Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters];
+  const unionParts = [];
+  const allValues = [];
+  let p = 1;
+
+  for (const block of filters) {
+    const conditions = [];
+    const exact = [
+      ['nomCorporacion', 'nomCorporacion'],
+      ['nomDepartamento', 'nomDepartamento'],
+      ['nomMunicipio', 'nomMunicipio'],
+      ['zona', 'zona'],
+      ['codPuesto', 'codPuesto'],
+      ['mesa', 'mesa'],
+    ];
+    for (const [param, field] of exact) {
+      if (block[param]) {
+        conditions.push(`row_data->>'${field}' = $${p}`);
+        allValues.push(block[param]);
+        p++;
+      }
+    }
+    if (block.nomLista) {
+      conditions.push(`row_data->>'nomLista' ILIKE $${p}`);
+      allValues.push(`%${block.nomLista}%`);
+      p++;
+    }
+    if (block.nomCandidato) {
+      conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
+      allValues.push(`%${block.nomCandidato}%`);
+      p++;
+    }
+    if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
+    else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
+
+    const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+    unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+  }
+
+  const combined = unionParts.join(' UNION ');
+  const numbered = `SELECT *, ROW_NUMBER() OVER (ORDER BY row_index) AS rn FROM (${combined}) AS combined`;
+
+  let rangeFilter = '';
+  if (applyRange && assignment.range_from && assignment.range_to) {
+    rangeFilter = ` WHERE rn >= $${p} AND rn <= $${p + 1}`;
+    allValues.push(assignment.range_from, assignment.range_to);
+  }
+
+  const result = await pool.query(
+    `SELECT row_data FROM (${numbered}) AS numbered${rangeFilter} ORDER BY row_index`,
+    allValues
+  );
+  return { assignment, rows: result.rows.map((r) => r.row_data) };
+}
+
+// GET /api/assignments/:id/csv — Download assignment rows as CSV
+router.get('/assignments/:id/csv', authMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user.rol === 'Administrador';
+    const data = await getAssignmentRows(req.params.id, { applyRange: !isAdmin });
+    if (!data) return res.status(404).json({ error: 'Not found' });
+
+    const BOM = '\uFEFF';
+    const sep = ';';
+    const header = EXPORT_COLUMNS.map((c) => c.label).join(sep);
+    const lines = data.rows.map((r) =>
+      EXPORT_COLUMNS.map((c) => escapeCsvCell(r[c.field])).join(sep)
+    );
+    const csv = BOM + header + '\n' + lines.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="asignacion-${req.params.id}.csv"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('Assignment CSV error:', err);
+    res.status(500).json({ error: 'Failed to generate CSV' });
+  }
+});
+
+// GET /api/assignments/:id/excel — Download assignment rows as Excel
+router.get('/assignments/:id/excel', authMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user.rol === 'Administrador';
+    const data = await getAssignmentRows(req.params.id, { applyRange: !isAdmin });
+    if (!data) return res.status(404).json({ error: 'Not found' });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Datos');
+
+    sheet.columns = EXPORT_COLUMNS.map((c) => ({
+      header: c.label,
+      key: c.field,
+      width: c.field === 'candidato' || c.field === 'nomPuesto' ? 25 : 15,
+    }));
+
+    // Style header row
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C3E6B' } };
+    headerRow.alignment = { horizontal: 'center' };
+
+    for (const row of data.rows) {
+      sheet.addRow(row);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="asignacion-${req.params.id}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Assignment Excel error:', err);
+    res.status(500).json({ error: 'Failed to generate Excel' });
   }
 });
 

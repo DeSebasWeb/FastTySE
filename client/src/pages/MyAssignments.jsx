@@ -189,10 +189,11 @@ export default function MyAssignments() {
     }));
   }
 
-  async function handleDownloadSinglePdf(assignmentId, rowIndex) {
+  async function handleDownloadSinglePdf(assignmentId, rowIndex, { noReclamar = false } = {}) {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.BASE_URL}api/assignments/${assignmentId}/report/${rowIndex}`, {
+      const url = `${import.meta.env.BASE_URL}api/assignments/${assignmentId}/report/${rowIndex}${noReclamar ? '?noReclamar=1' : ''}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -201,24 +202,25 @@ export default function MyAssignments() {
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `evidencia-fila-${rowIndex}.pdf`;
+      a.href = blobUrl;
+      a.download = noReclamar ? `investigacion-fila-${rowIndex}.pdf` : `evidencia-fila-${rowIndex}.pdf`;
       a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
     } catch (err) {
       console.error('Single PDF error:', err);
       alert('Error generando PDF');
     }
   }
 
-  async function handleGenerateReport() {
+  async function handleGenerateReport({ noReclamar = false } = {}) {
     if (!selected) return;
     setGeneratingReport(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.BASE_URL}api/assignments/${selected.id}/report`, {
+      const url = `${import.meta.env.BASE_URL}api/assignments/${selected.id}/report${noReclamar ? '?noReclamar=1' : ''}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -227,17 +229,40 @@ export default function MyAssignments() {
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `informe-${selected.label.replace(/[^a-z0-9]/gi, '_')}.pdf`;
+      a.href = blobUrl;
+      const prefix = noReclamar ? 'investigacion' : 'informe';
+      a.download = `${prefix}-${selected.label.replace(/[^a-z0-9]/gi, '_')}.pdf`;
       a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
     } catch (err) {
       console.error('Report error:', err);
       alert('Error generando el informe');
     } finally {
       setGeneratingReport(false);
+    }
+  }
+
+  async function handleDownloadFile(format) {
+    if (!selected) return;
+    try {
+      const token = localStorage.getItem('token');
+      const url = `${import.meta.env.BASE_URL}api/assignments/${selected.id}/${format}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const ext = format === 'excel' ? 'xlsx' : 'csv';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `asignacion-${selected.label.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    } catch (err) {
+      console.error(`Download ${format} error:`, err);
+      alert(`Error descargando ${format.toUpperCase()}`);
     }
   }
 
@@ -392,22 +417,41 @@ export default function MyAssignments() {
                   {label}
                 </button>
                 {ev?.status === 'uploaded' && (
-                  <button
-                    onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
-                    title="Descargar PDF individual"
-                    style={{
-                      background: '#2c3e6b',
-                      color: '#fff',
-                      border: 'none',
-                      fontSize: '0.65rem',
-                      padding: '0.15rem 0.4rem',
-                      borderRadius: 'var(--radius)',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    PDF
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
+                      title="Descargar PDF individual"
+                      style={{
+                        background: '#2c3e6b',
+                        color: '#fff',
+                        border: 'none',
+                        fontSize: '0.65rem',
+                        padding: '0.15rem 0.4rem',
+                        borderRadius: 'var(--radius)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      PDF
+                    </button>
+                    <button
+                      onClick={() => handleDownloadSinglePdf(selected.id, globalIndex, { noReclamar: true })}
+                      title="PDF sin reclamación — solo investigación"
+                      style={{
+                        background: '#c0392b',
+                        color: '#fff',
+                        border: 'none',
+                        fontSize: '0.6rem',
+                        padding: '0.15rem 0.35rem',
+                        borderRadius: 'var(--radius)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        fontWeight: 700,
+                      }}
+                    >
+                      NO RECLAMAR
+                    </button>
+                  </>
                 )}
               </div>
             );
@@ -447,22 +491,41 @@ export default function MyAssignments() {
                 </span>
               )}
               {ev?.status === 'uploaded' && (
-                <button
-                  onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
-                  title="Descargar PDF individual"
-                  style={{
-                    background: '#2c3e6b',
-                    color: '#fff',
-                    border: 'none',
-                    fontSize: '0.65rem',
-                    padding: '0.15rem 0.4rem',
-                    borderRadius: 'var(--radius)',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  PDF
-                </button>
+                <>
+                  <button
+                    onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
+                    title="Descargar PDF individual"
+                    style={{
+                      background: '#2c3e6b',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: '0.65rem',
+                      padding: '0.15rem 0.4rem',
+                      borderRadius: 'var(--radius)',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    PDF
+                  </button>
+                  <button
+                    onClick={() => handleDownloadSinglePdf(selected.id, globalIndex, { noReclamar: true })}
+                    title="PDF sin reclamación — solo investigación"
+                    style={{
+                      background: '#c0392b',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: '0.6rem',
+                      padding: '0.15rem 0.35rem',
+                      borderRadius: 'var(--radius)',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 700,
+                    }}
+                  >
+                    NO RECLAMAR
+                  </button>
+                </>
               )}
             </div>
           );
@@ -564,13 +627,65 @@ export default function MyAssignments() {
                 Volver
               </button>
               <h2 className={styles.title}>{selected.label}</h2>
-              <button
-                className={styles.reportBtn}
-                onClick={handleGenerateReport}
-                disabled={generatingReport}
-              >
-                {generatingReport ? 'Generando...' : 'Generar Informe PDF'}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  className={styles.reportBtn}
+                  onClick={() => handleGenerateReport()}
+                  disabled={generatingReport}
+                >
+                  {generatingReport ? 'Generando...' : 'Generar Informe PDF'}
+                </button>
+                <button
+                  onClick={() => handleGenerateReport({ noReclamar: true })}
+                  disabled={generatingReport}
+                  style={{
+                    background: '#c0392b',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    padding: '0.4rem 0.8rem',
+                    borderRadius: 'var(--radius)',
+                    cursor: generatingReport ? 'not-allowed' : 'pointer',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    opacity: generatingReport ? 0.6 : 1,
+                  }}
+                >
+                  OJO - NO RECLAMAR
+                </button>
+                <button
+                  onClick={() => handleDownloadFile('csv')}
+                  style={{
+                    background: '#27ae60',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    padding: '0.4rem 0.8rem',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Descargar CSV
+                </button>
+                <button
+                  onClick={() => handleDownloadFile('excel')}
+                  style={{
+                    background: '#2980b9',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    padding: '0.4rem 0.8rem',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Descargar Excel
+                </button>
+              </div>
             </div>
 
             {/* Admin: show assigned ranges summary */}
