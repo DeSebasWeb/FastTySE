@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
+import puppeteer from 'puppeteer';
 
 const router = Router();
 
@@ -72,6 +73,37 @@ router.get('/assignments', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/assignments/progress — Admin: progress summary per analyst
+router.get(
+  '/assignments/progress',
+  authMiddleware,
+  requireRole('Administrador'),
+  async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT
+          a.id AS assignment_id,
+          a.user_name,
+          a.label,
+          a.range_from,
+          a.range_to,
+          COALESCE(a.range_to - a.range_from + 1, 0) AS total_rows,
+          COUNT(e.id) FILTER (WHERE e.status = 'uploaded') AS uploaded,
+          COUNT(e.id) FILTER (WHERE e.status = 'no_evidence') AS no_evidence,
+          a.created_at
+        FROM assignments a
+        LEFT JOIN evidences e ON e.assignment_id = a.id
+        GROUP BY a.id
+        ORDER BY a.user_name, a.created_at DESC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Progress error:', err);
+      res.status(500).json({ error: 'Failed to fetch progress' });
+    }
+  }
+);
+
 // GET /api/assignments/:id/siblings — Get all assignments sharing same filters (for seeing assigned ranges)
 router.get(
   '/assignments/:id/siblings',
@@ -102,6 +134,385 @@ router.get(
     }
   }
 );
+
+// GET /api/assignments/:id/report — Generate HTML report for an assignment
+router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
+  try {
+    // Get assignment info
+    const assignResult = await pool.query(
+      `SELECT * FROM assignments WHERE id = $1`, [req.params.id]
+    );
+    if (assignResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const assignment = assignResult.rows[0];
+
+    // Optional fecha filter — passed as ?fecha=2026-03-08
+    const fechaFilter = req.query.fecha || null;
+
+    // Get evidences with status = 'uploaded' for this assignment
+    const evResult = await pool.query(
+      `SELECT * FROM evidences WHERE assignment_id = $1 AND status = 'uploaded' ORDER BY row_index`,
+      [req.params.id]
+    );
+    if (evResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No hay evidencias subidas para esta asignación' });
+    }
+
+    // Rebuild the same UNION query used by /dashboard/multi-rows
+    // so that rn values match exactly what was saved in evidences.row_index
+    const filters = Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters];
+    const unionParts = [];
+    const allValues = [];
+    let p = 1;
+
+    for (const block of filters) {
+      const conditions = [];
+      const exact = [
+        ['nomCorporacion', 'nomCorporacion'],
+        ['nomDepartamento', 'nomDepartamento'],
+        ['nomMunicipio', 'nomMunicipio'],
+        ['zona', 'zona'],
+        ['codPuesto', 'codPuesto'],
+        ['mesa', 'mesa'],
+      ];
+      for (const [param, field] of exact) {
+        if (block[param]) {
+          conditions.push(`row_data->>'${field}' = $${p}`);
+          allValues.push(block[param]);
+          p++;
+        }
+      }
+      if (block.nomLista) {
+        conditions.push(`row_data->>'nomLista' ILIKE $${p}`);
+        allValues.push(`%${block.nomLista}%`);
+        p++;
+      }
+      if (block.nomCandidato) {
+        conditions.push(`row_data->>'candidato' ILIKE $${p}`);
+        allValues.push(`%${block.nomCandidato}%`);
+        p++;
+      }
+      if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
+      else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
+
+      const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+      // Must match multi-rows filter (completed = FALSE) so ROW_NUMBER matches evidence.row_index
+      unionParts.push(`SELECT row_data, row_index, fecha_csv FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    }
+
+    // Same numbering as multi-rows: ROW_NUMBER over the full UNION ordered by row_index
+    const combined = unionParts.join(' UNION ');
+    const numbered = `SELECT *, ROW_NUMBER() OVER (ORDER BY row_index) AS rn FROM (${combined}) AS combined`;
+    const rowsResult = await pool.query(`SELECT * FROM (${numbered}) AS numbered ORDER BY rn`, allValues);
+
+    // Build a map rn -> { row_data, fecha_csv }  (rn matches evidence.row_index)
+    const rowMap = {};
+    for (const r of rowsResult.rows) {
+      rowMap[Number(r.rn)] = { data: r.row_data, fecha: r.fecha_csv ? r.fecha_csv.toISOString().slice(0, 10) : null };
+    }
+
+    // Apply range if set
+    const rangeFrom = assignment.range_from;
+    const rangeTo = assignment.range_to;
+
+    // Build HTML
+    const now = new Date();
+    const tzOpts = { timeZone: 'America/Bogota' };
+    const fecha = now.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric', ...tzOpts });
+
+    function getTitle(row) {
+      const corp = (row.nomCorporacion || '').toUpperCase().includes('SENADO') ? 'SENADO' : 'CÁMARA';
+      const dif = Number(row['Diferencia'] || 0);
+      if (dif < 0) return `RECLAMACIÓN POR FALTA DE VOTOS - ${corp} 2026`;
+      if (dif === 0) return `RECLAMACIÓN POR VOTACIÓN EN CERO - ${corp} 2026`;
+      return `RECLAMACIÓN POR EXCESO DE VOTOS - ${corp} 2026`;
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    const pages = [];
+    for (const ev of evResult.rows) {
+      const rn = ev.row_index;
+      // Skip if outside range
+      if (rangeFrom && rangeTo && (rn < rangeFrom || rn > rangeTo)) continue;
+      const entry = rowMap[rn];
+      if (!entry) continue;
+      // Skip if fecha filter provided and row doesn't match
+      if (fechaFilter && entry.fecha !== fechaFilter) continue;
+      const row = entry.data;
+
+      const title = getTitle(row);
+      const dif = Number(row['Diferencia'] || 0);
+      const difColor = dif < 0 ? '#c0392b' : dif > 0 ? '#27ae60' : '#e67e22';
+      const difLabel = dif < 0
+        ? `<span style="color:${difColor};font-weight:700">${dif} (Falta de votos)</span>`
+        : dif === 0
+        ? `<span style="color:${difColor};font-weight:700">0 (Cero)</span>`
+        : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
+
+      const rotation = ev.rotation || 0;
+      const isRotated = rotation === 90 || rotation === 270;
+      const imgStyle = rotation
+        ? `transform:rotate(${rotation}deg);max-width:${isRotated ? '70%' : '100%'};object-fit:contain;`
+        : `max-width:100%;object-fit:contain;`;
+
+      pages.push(`
+        <div class="page">
+          <h1 class="report-title">${escapeHtml(title)}</h1>
+          <hr class="title-line"/>
+          <div class="date-row">Fecha: ${fecha}</div>
+
+          <table class="info-table">
+            <thead>
+              <tr>
+                <th>Departamento</th>
+                <th>Municipio</th>
+                <th>Zona</th>
+                <th>Puesto</th>
+                <th>Mesa</th>
+                <th>Partido</th>
+                <th>Candidato</th>
+                <th>E14</th>
+                <th>Votos Escrutinio<br/>(MMV)</th>
+                <th>Diferencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${escapeHtml(row.nomDepartamento)}</td>
+                <td>${escapeHtml(row.nomMunicipio)}</td>
+                <td>${escapeHtml(row.zona)}</td>
+                <td>${escapeHtml(row.nomPuesto)}</td>
+                <td>${escapeHtml(row.mesa)}</td>
+                <td>${escapeHtml(row.nomLista)}</td>
+                <td>${escapeHtml(row.candidato)}</td>
+                <td>${escapeHtml(row['Votos E14'])}</td>
+                <td>${escapeHtml(row['Votos MMV'])}</td>
+                <td>${difLabel}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="section-title">1. Evidencias Documentales</div>
+          <div class="formulario-label">Formulario E-14</div>
+          <hr class="blue-line"/>
+          <div class="image-wrap" style="${isRotated ? 'min-height:400px;display:flex;align-items:center;justify-content:center;' : ''}">
+            <img src="${ev.image_data}" style="${imgStyle}" alt="Formulario E-14"/>
+          </div>
+
+          ${ev.observations ? `
+          <div class="obs-section">
+            <div class="obs-title">Observaciones</div>
+            <hr class="obs-line"/>
+            <div class="obs-content">
+              <div class="obs-bar"></div>
+              <span>${escapeHtml(ev.observations)}</span>
+            </div>
+          </div>` : ''}
+
+          <div class="footer">
+            Documento generado por Auditoría Escrutinio Congreso 2026 — ${now.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}
+          </div>
+        </div>
+      `);
+    }
+
+    if (pages.length === 0) {
+      return res.status(404).json({ error: 'No hay evidencias dentro del rango asignado' });
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Informe de Reclamaciones</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
+    .page { width: 100%; padding: 20mm 18mm; page-break-after: always; }
+    .report-title { font-size: 18px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 10px; }
+    .date-row { text-align: right; font-size: 11px; color: #555; margin-bottom: 14px; }
+    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; table-layout: fixed; }
+    .info-table th { background: #2c3e6b; color: #fff; padding: 6px 4px; text-align: center; font-size: 10px; border: 1px solid #2c3e6b; word-wrap: break-word; }
+    .info-table td { padding: 8px 4px; text-align: center; border: 1px solid #ccc; font-size: 10px; vertical-align: middle; word-wrap: break-word; }
+    .section-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; clear: both; }
+    .formulario-label { color: #2980b9; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+    .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 14px; }
+    .image-wrap { text-align: center; margin-bottom: 18px; clear: both; display: block; }
+    .image-wrap img { border: 1px solid #ddd; border-radius: 4px; display: block; margin: 0 auto; max-width: 100%; height: auto; }
+    .obs-section { margin-top: 18px; }
+    .obs-title { font-weight: 700; font-size: 13px; color: #555; margin-bottom: 4px; }
+    .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 10px; }
+    .obs-content { display: flex; align-items: flex-start; gap: 10px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; }
+    .obs-bar { width: 4px; min-height: 30px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
+    .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  ${pages.join('\n')}
+</body>
+</html>`;
+
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      const browserPage = await browser.newPage();
+      await browserPage.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      const pdfBuffer = await browserPage.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="informe-${assignment.id}.pdf"`);
+      return res.send(Buffer.from(pdfBuffer));
+    } finally {
+      if (browser) await browser.close();
+    }
+  } catch (err) {
+    console.error('Report error:', err);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// GET /api/assignments/:assignmentId/report/:rowIndex — PDF individual de una fila
+router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async (req, res) => {
+  try {
+    const { assignmentId, rowIndex } = req.params;
+    const rn = Number(rowIndex);
+
+    const assignResult = await pool.query(`SELECT * FROM assignments WHERE id = $1`, [assignmentId]);
+    if (assignResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const assignment = assignResult.rows[0];
+
+    const evResult = await pool.query(
+      `SELECT * FROM evidences WHERE assignment_id = $1 AND row_index = $2 AND status = 'uploaded'`,
+      [assignmentId, rn]
+    );
+    if (evResult.rows.length === 0) return res.status(404).json({ error: 'No hay evidencia para esta fila' });
+    const ev = evResult.rows[0];
+
+    // Rebuild row data using same UNION query
+    const filters = Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters];
+    const unionParts = [];
+    const allValues = [];
+    let p = 1;
+    for (const block of filters) {
+      const conditions = [];
+      const exact = [
+        ['nomCorporacion','nomCorporacion'],['nomDepartamento','nomDepartamento'],
+        ['nomMunicipio','nomMunicipio'],['zona','zona'],['codPuesto','codPuesto'],['mesa','mesa'],
+      ];
+      for (const [param, field] of exact) {
+        if (block[param]) { conditions.push(`row_data->>'${field}' = $${p}`); allValues.push(block[param]); p++; }
+      }
+      if (block.nomLista) { conditions.push(`row_data->>'nomLista' ILIKE $${p}`); allValues.push(`%${block.nomLista}%`); p++; }
+      if (block.nomCandidato) { conditions.push(`row_data->>'candidato' ILIKE $${p}`); allValues.push(`%${block.nomCandidato}%`); p++; }
+      if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
+      else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
+      const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    }
+    const combined = unionParts.join(' UNION ');
+    const numbered = `SELECT *, ROW_NUMBER() OVER (ORDER BY row_index) AS rn FROM (${combined}) AS combined`;
+    const rowsResult = await pool.query(
+      `SELECT * FROM (${numbered}) AS numbered WHERE rn = $${p}`,
+      [...allValues, rn]
+    );
+    if (rowsResult.rows.length === 0) return res.status(404).json({ error: 'Fila no encontrada' });
+    const row = rowsResult.rows[0].row_data;
+
+    const now = new Date();
+    const tzOpts = { timeZone: 'America/Bogota' };
+    const fecha = now.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric', ...tzOpts });
+    const corp = (row.nomCorporacion || '').toUpperCase().includes('SENADO') ? 'SENADO' : 'CÁMARA';
+    const dif = Number(row['Diferencia'] || 0);
+    const title = dif < 0 ? `RECLAMACIÓN POR FALTA DE VOTOS - ${corp} 2026`
+      : dif === 0 ? `RECLAMACIÓN POR VOTACIÓN EN CERO - ${corp} 2026`
+      : `RECLAMACIÓN POR EXCESO DE VOTOS - ${corp} 2026`;
+    const difColor = dif < 0 ? '#c0392b' : dif > 0 ? '#27ae60' : '#e67e22';
+    const difLabel = dif < 0 ? `<span style="color:${difColor};font-weight:700">${dif} (Falta de votos)</span>`
+      : dif === 0 ? `<span style="color:${difColor};font-weight:700">0 (Cero)</span>`
+      : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
+    const escapeHtml = (str) => String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const rotation = ev.rotation || 0;
+    const isRotated = rotation === 90 || rotation === 270;
+    const imgStyle = rotation
+      ? `transform:rotate(${rotation}deg);max-width:${isRotated ? '70%' : '100%'};object-fit:contain;`
+      : `max-width:100%;object-fit:contain;`;
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
+  .page { width: 100%; padding: 20mm 18mm; }
+  .report-title { font-size: 18px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 10px; }
+  .date-row { text-align: right; font-size: 11px; color: #555; margin-bottom: 14px; }
+  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; table-layout: fixed; }
+  .info-table th { background: #2c3e6b; color: #fff; padding: 6px 4px; text-align: center; font-size: 10px; border: 1px solid #2c3e6b; word-wrap: break-word; }
+  .info-table td { padding: 8px 4px; text-align: center; border: 1px solid #ccc; font-size: 10px; vertical-align: middle; word-wrap: break-word; }
+  .section-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; clear: both; }
+  .formulario-label { color: #2980b9; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .blue-line { border: none; border-top: 2px solid #2980b9; margin-bottom: 14px; }
+  .image-wrap { text-align: center; margin-bottom: 18px; clear: both; display: block; }
+  .image-wrap img { border: 1px solid #ddd; border-radius: 4px; display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .obs-section { margin-top: 18px; }
+  .obs-title { font-weight: 700; font-size: 13px; color: #555; margin-bottom: 4px; }
+  .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 10px; }
+  .obs-content { display: flex; align-items: flex-start; gap: 10px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; }
+  .obs-bar { width: 4px; min-height: 30px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
+  .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+</style></head><body>
+<div class="page">
+  <h1 class="report-title">${escapeHtml(title)}</h1>
+  <hr class="title-line"/>
+  <div class="date-row">Fecha: ${fecha}</div>
+  <table class="info-table"><thead><tr>
+    <th>Departamento</th><th>Municipio</th><th>Zona</th><th>Puesto</th><th>Mesa</th>
+    <th>Partido</th><th>Candidato</th><th>E14</th><th>Votos Escrutinio<br/>(MMV)</th><th>Diferencia</th>
+  </tr></thead><tbody><tr>
+    <td>${escapeHtml(row.nomDepartamento)}</td><td>${escapeHtml(row.nomMunicipio)}</td>
+    <td>${escapeHtml(row.zona)}</td><td>${escapeHtml(row.nomPuesto)}</td><td>${escapeHtml(row.mesa)}</td>
+    <td>${escapeHtml(row.nomLista)}</td><td>${escapeHtml(row.candidato)}</td>
+    <td>${escapeHtml(row['Votos E14'])}</td><td>${escapeHtml(row['Votos MMV'])}</td><td>${difLabel}</td>
+  </tr></tbody></table>
+  <div class="section-title">1. Evidencias Documentales</div>
+  <div class="formulario-label">Formulario E-14</div>
+  <hr class="blue-line"/>
+  <div class="image-wrap" style="${isRotated ? 'min-height:400px;display:flex;align-items:center;justify-content:center;' : ''}">
+    <img src="${ev.image_data}" style="${imgStyle}" alt="Formulario E-14"/>
+  </div>
+  ${ev.observations ? `<div class="obs-section"><div class="obs-title">Observaciones</div><hr class="obs-line"/>
+  <div class="obs-content"><div class="obs-bar"></div><span>${escapeHtml(ev.observations)}</span></div></div>` : ''}
+  <div class="footer">Documento generado por Auditoría Escrutinio Congreso 2026 — ${now.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}</div>
+</div></body></html>`;
+
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      const browserPage = await browser.newPage();
+      await browserPage.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      const pdfBuffer = await browserPage.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="evidencia-fila-${rn}.pdf"`);
+      return res.send(Buffer.from(pdfBuffer));
+    } finally {
+      if (browser) await browser.close();
+    }
+  } catch (err) {
+    console.error('Single row report error:', err);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
 
 // DELETE /api/assignments/:id — Admin deletes an assignment
 router.delete(
