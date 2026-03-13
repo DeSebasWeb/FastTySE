@@ -34,21 +34,23 @@ function buildLabel(filters) {
 }
 
 function buildCombinedLabel(queue) {
-  // Shared parts (corp, depto, muni) + unique parts per block
   if (queue.length === 0) return 'Sin filtros';
   const first = queue[0].filters;
   const shared = [first.nomCorporacion, first.nomDepartamento, first.nomMunicipio].filter(Boolean);
   const unique = queue.map((q) => {
     const parts = [];
     if (q.filters.nomLista) parts.push(q.filters.nomLista);
-    if (q.filters.nomCandidato) parts.push(q.filters.nomCandidato);
-    if (q.filters.diferencia) parts.push(q.filters.diferencia === 'ganando' ? 'Ganando' : 'Perdiendo');
+    if (q.filters.diferencia) parts.push(q.filters.diferencia === 'ganando' ? 'Gan.' : 'Perd.');
     return parts.join(' ');
   }).filter(Boolean);
 
   let label = shared.join(' / ');
   if (unique.length > 0 && unique.some((u) => u)) {
-    label += ' — ' + unique.join(', ');
+    // Show max 2 unique parts, then "+ N más"
+    const shown = unique.slice(0, 2);
+    const rest = unique.length - shown.length;
+    label += ' — ' + shown.join(', ');
+    if (rest > 0) label += ` +${rest} más`;
   }
   return label || 'Todos los datos';
 }
@@ -143,6 +145,13 @@ export default function Assign() {
     getAnalysts().then(setAnalysts).catch(console.error);
   }, []);
 
+  // Redistribute ranges when total changes
+  useEffect(() => {
+    if (selectedUsers.size > 0) {
+      setUserRanges(distributeRanges(selectedUsers));
+    }
+  }, [total]);
+
   function handleAddToQueue() {
     const snapshot = { ...filters };
     const label = buildLabel(snapshot);
@@ -155,16 +164,32 @@ export default function Assign() {
     setQueue((prev) => prev.filter((q) => q.id !== id));
   }
 
+  // Recalculate equitable ranges whenever selectedUsers changes
+  function distributeRanges(userIds) {
+    if (userIds.size === 0 || total === 0) return {};
+    const ids = [...userIds];
+    const perUser = Math.floor(total / ids.length);
+    const remainder = total % ids.length;
+    const ranges = {};
+    let start = 1;
+    for (let i = 0; i < ids.length; i++) {
+      const extra = i < remainder ? 1 : 0;
+      const end = start + perUser + extra - 1;
+      ranges[ids[i]] = { from: start, to: end };
+      start = end + 1;
+    }
+    return ranges;
+  }
+
   function toggleUser(user) {
     setSelectedUsers((prev) => {
       const next = new Set(prev);
       if (next.has(user.id)) {
         next.delete(user.id);
-        setUserRanges((r) => { const n = { ...r }; delete n[user.id]; return n; });
       } else {
         next.add(user.id);
-        setUserRanges((r) => ({ ...r, [user.id]: { from: 1, to: total } }));
       }
+      setUserRanges(distributeRanges(next));
       return next;
     });
   }
