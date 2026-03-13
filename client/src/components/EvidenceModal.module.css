@@ -34,6 +34,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
@@ -274,4 +275,40 @@
 .deleteEvidenceBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Navigation bar (prev/next row) */
+.navBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navBtn {
+  background: var(--surface-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.navBtn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.navBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.navLabel {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }

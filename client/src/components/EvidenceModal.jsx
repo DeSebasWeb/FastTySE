@@ -36,7 +36,7 @@ function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRi
   );
 }
 
-export default function EvidenceModal({ evidence, onSave, onDelete, onClose, readOnly }) {
+export default function EvidenceModal({ evidence, onSave, onDelete, onClose, readOnly, rowLabel, onPrev, onNext }) {
   const hasExisting = evidence?.status === 'uploaded';
   const [editing, setEditing] = useState(!hasExisting);
   const [imageData, setImageData] = useState(evidence?.image_data || null);
@@ -44,6 +44,14 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
   const [observations, setObservations] = useState(evidence?.observations || '');
   const [saving, setSaving] = useState(false);
   const dropRef = useRef(null);
+
+  // Reset state when evidence changes (navigation)
+  useEffect(() => {
+    setEditing(!evidence?.status || evidence?.status !== 'uploaded');
+    setImageData(evidence?.image_data || null);
+    setRotation(evidence?.rotation || 0);
+    setObservations(evidence?.observations || '');
+  }, [evidence?.id, evidence?.row_index, rowLabel]);
 
   useEffect(() => {
     if (readOnly) return;
@@ -115,6 +123,14 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
     }
   }
 
+  const navBar = (
+    <div className={styles.navBar}>
+      <button className={styles.navBtn} onClick={onPrev} disabled={!onPrev}>&larr;</button>
+      <span className={styles.navLabel}>{rowLabel || 'Evidencia'}</span>
+      <button className={styles.navBtn} onClick={onNext} disabled={!onNext}>&rarr;</button>
+    </div>
+  );
+
   // ---- READ ONLY MODE (Admin viewing) ----
   if (readOnly) {
     return (
@@ -122,6 +138,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
         <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
           <div className={styles.header}>
             <h3>Evidencia E14</h3>
+            {navBar}
             <button className={styles.closeBtn} onClick={onClose}>&times;</button>
           </div>
           {hasExisting ? (
@@ -151,6 +168,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
         <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
           <div className={styles.header}>
             <h3>Evidencia E14</h3>
+            {navBar}
             <button className={styles.closeBtn} onClick={onClose}>&times;</button>
           </div>
 
@@ -196,6 +214,7 @@ export default function EvidenceModal({ evidence, onSave, onDelete, onClose, rea
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <h3>{hasExisting ? 'Actualizar evidencia' : 'Evidencia E14'}</h3>
+          {navBar}
           <button className={styles.closeBtn} onClick={onClose}>&times;</button>
         </div>
 

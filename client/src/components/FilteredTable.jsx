@@ -38,7 +38,7 @@ export default function FilteredTable({
       cols.push({
         id: '_index',
         header: '#',
-        cell: (info) => (page - 1) * 100 + info.row.index + 1,
+        cell: (info) => info.row.original._globalIndex ?? ((page - 1) * 100 + info.row.index + 1),
         size: 50,
       });
     }

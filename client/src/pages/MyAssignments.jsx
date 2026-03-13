@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import NavBar from '../components/NavBar.jsx';
 import FilteredTable from '../components/FilteredTable.jsx';
 import EvidenceModal from '../components/EvidenceModal.jsx';
 import {
   getAssignments, getMultiRows, getEvidences, saveEvidence, deleteEvidence,
   deleteAssignment, getAssignmentSiblings, getAnalysts, createAssignments,
+  getAssignmentsProgress,
 } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import styles from './MyAssignments.module.css';
@@ -33,12 +34,18 @@ export default function MyAssignments() {
   const [selectedUsers, setSelectedUsers] = useState(new Set());
   const [userRanges, setUserRanges] = useState({});
   const [assigning, setAssigning] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'done' | 'no_evidence'
+  const [progressData, setProgressData] = useState([]);
 
   useEffect(() => {
     getAssignments()
       .then(setAssignments)
       .catch(console.error)
       .finally(() => setLoading(false));
+    if (isAdmin) {
+      getAssignmentsProgress().then(setProgressData).catch(console.error);
+    }
   }, []);
 
   // Load rows when an assignment is selected
@@ -182,6 +189,58 @@ export default function MyAssignments() {
     }));
   }
 
+  async function handleDownloadSinglePdf(assignmentId, rowIndex) {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/assignments/${assignmentId}/report/${rowIndex}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        try { alert(JSON.parse(text).error); } catch { alert('Error generando PDF'); }
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `evidencia-fila-${rowIndex}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      console.error('Single PDF error:', err);
+      alert('Error generando PDF');
+    }
+  }
+
+  async function handleGenerateReport() {
+    if (!selected) return;
+    setGeneratingReport(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/assignments/${selected.id}/report`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || 'Error generando el informe');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `informe-${selected.label.replace(/[^a-z0-9]/gi, '_')}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      console.error('Report error:', err);
+      alert('Error generando el informe');
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   async function handleAssignMore() {
     if (selectedUsers.size === 0 || !selected) return;
     setAssigning(true);
@@ -212,6 +271,84 @@ export default function MyAssignments() {
     }
   }
 
+  // Progress calculation
+  const progress = useMemo(() => {
+    if (!selected || total === 0) return { uploaded: 0, noEvidence: 0, pending: 0, total: 0, pct: 0 };
+    const evValues = Object.values(evidences);
+    const uploaded = evValues.filter((e) => e.status === 'uploaded').length;
+    const noEvidence = evValues.filter((e) => e.status === 'no_evidence').length;
+    const done = uploaded + noEvidence;
+    return { uploaded, noEvidence, pending: total - done, total, pct: Math.round((done / total) * 100) };
+  }, [evidences, total, selected]);
+
+  // Filter rows by evidence status — preserve original global index
+  const filteredRows = useMemo(() => {
+    const pageStart = (page - 1) * 100 + 1;
+    const tagged = rows.map((row, i) => ({ ...row, _globalIndex: pageStart + i }));
+    if (statusFilter === 'all') return tagged;
+    return tagged.filter((row) => {
+      const ev = evidences[row._globalIndex];
+      if (statusFilter === 'pending') return !ev;
+      if (statusFilter === 'done') return ev?.status === 'uploaded';
+      if (statusFilter === 'no_evidence') return ev?.status === 'no_evidence';
+      return true;
+    });
+  }, [rows, evidences, statusFilter, page]);
+
+  // Navigate between rows in modal (respects active filter)
+  const navigateModal = useCallback((direction) => {
+    if (!modalRow || !selected || filteredRows.length === 0) return;
+    // Find current position in filteredRows by _globalIndex
+    const curIdx = filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex);
+    if (curIdx === -1) return;
+    const nextIdx = curIdx + direction;
+    if (nextIdx < 0 || nextIdx >= filteredRows.length) return;
+    const nextRow = filteredRows[nextIdx];
+    setModalRow({ rowIndex: nextRow._globalIndex, row: nextRow });
+  }, [modalRow, selected, filteredRows]);
+
+  // Keyboard shortcuts for modal navigation
+  useEffect(() => {
+    if (!modalRow) return;
+    function handleKey(e) {
+      // Don't capture keys when user is typing in an input field
+      if (e.target.matches('input, textarea, select, [contenteditable]')) {
+        if (e.key === 'Escape') setModalRow(null);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigateModal(-1);
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigateModal(1);
+      } else if (e.key === 'Escape') {
+        setModalRow(null);
+      }
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [modalRow, navigateModal]);
+
+  // Bulk mark as no_evidence
+  async function handleBulkNoEvidence() {
+    if (!selected) return;
+    const pending = [];
+    const pageStart = (page - 1) * 100 + 1;
+    for (let i = 0; i < rows.length; i++) {
+      const gi = pageStart + i;
+      if (!evidences[gi]) pending.push(gi);
+    }
+    if (pending.length === 0) { alert('No hay filas pendientes en esta página'); return; }
+    if (!confirm(`¿Marcar ${pending.length} filas como "Sin evidencia"?`)) return;
+    for (const rowIndex of pending) {
+      try {
+        const result = await saveEvidence({ assignmentId: selected.id, rowIndex, status: 'no_evidence', imageData: null, rotation: 0, observations: null });
+        setEvidences((prev) => ({ ...prev, [rowIndex]: result }));
+      } catch (err) { console.error('Bulk no_evidence error:', err); }
+    }
+  }
+
   // Extra columns: evidence status for both admin and analyst
   const extraColumns = useMemo(() => {
     if (!selected) return undefined;
@@ -220,7 +357,7 @@ export default function MyAssignments() {
         id: '_evidence',
         header: 'Evidencia',
         cell: (info) => {
-          const globalIndex = (page - 1) * 100 + info.row.index + 1;
+          const globalIndex = info.row.original._globalIndex ?? ((page - 1) * 100 + info.row.index + 1);
           const ev = evidences[globalIndex];
 
           if (isAdmin) {
@@ -237,21 +374,41 @@ export default function MyAssignments() {
               : 'var(--danger, #e74c3c)';
 
             return (
-              <button
-                onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color,
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: '0.15rem 0',
-                  textDecoration: ev?.status === 'uploaded' ? 'underline' : 'none',
-                }}
-              >
-                {label}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <button
+                  onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color,
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '0.15rem 0',
+                    textDecoration: ev?.status === 'uploaded' ? 'underline' : 'none',
+                  }}
+                >
+                  {label}
+                </button>
+                {ev?.status === 'uploaded' && (
+                  <button
+                    onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
+                    title="Descargar PDF individual"
+                    style={{
+                      background: '#2c3e6b',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: '0.65rem',
+                      padding: '0.15rem 0.4rem',
+                      borderRadius: 'var(--radius)',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    PDF
+                  </button>
+                )}
+              </div>
             );
           }
 
@@ -288,6 +445,24 @@ export default function MyAssignments() {
                   {statusLabel}
                 </span>
               )}
+              {ev?.status === 'uploaded' && (
+                <button
+                  onClick={() => handleDownloadSinglePdf(selected.id, globalIndex)}
+                  title="Descargar PDF individual"
+                  style={{
+                    background: '#2c3e6b',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: '0.65rem',
+                    padding: '0.15rem 0.4rem',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  PDF
+                </button>
+              )}
             </div>
           );
         },
@@ -306,6 +481,42 @@ export default function MyAssignments() {
             <h2 className={styles.title}>
               {isAdmin ? 'Asignaciones' : 'Mis Asignaciones'}
             </h2>
+            {/* Admin: progress summary */}
+            {isAdmin && progressData.length > 0 && !loading && (
+              <div className={styles.progressPanel}>
+                <h3 className={styles.progressPanelTitle}>Progreso por analista</h3>
+                <div className={styles.progressTable}>
+                  {(() => {
+                    // Group by user_name
+                    const grouped = {};
+                    for (const r of progressData) {
+                      const name = r.user_name || 'Sin asignar';
+                      if (!grouped[name]) grouped[name] = { totalRows: 0, uploaded: 0, noEvidence: 0 };
+                      grouped[name].totalRows += Number(r.total_rows) || 0;
+                      grouped[name].uploaded += Number(r.uploaded) || 0;
+                      grouped[name].noEvidence += Number(r.no_evidence) || 0;
+                    }
+                    return Object.entries(grouped).map(([name, d]) => {
+                      const done = d.uploaded + d.noEvidence;
+                      const pct = d.totalRows > 0 ? Math.round((done / d.totalRows) * 100) : 0;
+                      return (
+                        <div key={name} className={styles.progressRow}>
+                          <span className={styles.progressName}>{name}</span>
+                          <div className={styles.progressBarSmall}>
+                            <div className={styles.progressFillSmall} style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className={styles.progressRowPct}>{pct}%</span>
+                          <span className={styles.progressRowDetail}>
+                            {done}/{d.totalRows}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <p className={styles.muted}>Cargando...</p>
             ) : assignments.length === 0 ? (
@@ -352,6 +563,13 @@ export default function MyAssignments() {
                 Volver
               </button>
               <h2 className={styles.title}>{selected.label}</h2>
+              <button
+                className={styles.reportBtn}
+                onClick={handleGenerateReport}
+                disabled={generatingReport}
+              >
+                {generatingReport ? 'Generando...' : 'Generar Informe PDF'}
+              </button>
             </div>
 
             {/* Admin: show assigned ranges summary */}
@@ -381,8 +599,40 @@ export default function MyAssignments() {
               </div>
             )}
 
+            {/* Progress bar */}
+            {total > 0 && (
+              <div className={styles.progressSection}>
+                <div className={styles.progressBar}>
+                  <div className={styles.progressFill} style={{ width: `${progress.pct}%` }} />
+                </div>
+                <div className={styles.progressStats}>
+                  <span className={styles.progressPct}>{progress.pct}%</span>
+                  <span className={styles.progressDetail}>
+                    {progress.uploaded} hechas · {progress.noEvidence} sin evidencia · {progress.pending} pendientes · {progress.total} total
+                  </span>
+                </div>
+                <div className={styles.progressActions}>
+                  <select
+                    className={styles.statusFilterSelect}
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todas</option>
+                    <option value="pending">Pendientes</option>
+                    <option value="done">Hechas</option>
+                    <option value="no_evidence">Sin evidencia</option>
+                  </select>
+                  {!isAdmin && (
+                    <button className={styles.bulkNoEvBtn} onClick={handleBulkNoEvidence}>
+                      Marcar página sin evidencia
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <FilteredTable
-              rows={rows}
+              rows={filteredRows}
               page={page}
               totalPages={totalPages}
               total={total}
@@ -461,6 +711,9 @@ export default function MyAssignments() {
           onDelete={handleDeleteEvidence}
           onClose={() => setModalRow(null)}
           readOnly={isAdmin}
+          rowLabel={`Fila ${modalRow.rowIndex} de ${total}`}
+          onPrev={filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex) > 0 ? () => navigateModal(-1) : null}
+          onNext={filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex) < filteredRows.length - 1 ? () => navigateModal(1) : null}
         />
       )}
     </div>
