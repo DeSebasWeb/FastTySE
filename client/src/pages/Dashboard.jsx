@@ -216,6 +216,52 @@ export default function Dashboard() {
     }
   }
 
+  async function handleDownloadExcel() {
+    setDownloading(true);
+    try {
+      const token = localStorage.getItem('token');
+      let url;
+      let fetchOpts;
+
+      if (queue.length > 0) {
+        const blocks = queue.map((q) => q.filters);
+        url = `${import.meta.env.BASE_URL}api/dashboard/multi-rows/excel`;
+        fetchOpts = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ blocks }),
+        };
+      } else {
+        const params = new URLSearchParams();
+        for (const [k, v] of Object.entries(apiFilters())) {
+          if (v != null && v !== '') params.set(k, v);
+        }
+        if (filters.diferencia) params.set('diferencia', filters.diferencia);
+        url = `${import.meta.env.BASE_URL}api/dashboard/rows/excel?${params.toString()}`;
+        fetchOpts = {
+          headers: { Authorization: `Bearer ${token}` },
+        };
+      }
+
+      const res = await fetch(url, fetchOpts);
+      if (!res.ok) throw new Error('Download failed');
+
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `datos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      console.error('Excel download error:', err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className={styles.page}>
       <NavBar />
@@ -270,13 +316,23 @@ export default function Dashboard() {
 
         <div className={styles.tableHeader}>
           {hasData && (
-            <button
-              className={styles.downloadBtn}
-              onClick={handleDownloadCsv}
-              disabled={downloading}
-            >
-              {downloading ? 'Descargando...' : 'Descargar CSV'}
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className={styles.downloadBtn}
+                onClick={handleDownloadCsv}
+                disabled={downloading}
+              >
+                {downloading ? 'Descargando...' : 'Descargar CSV'}
+              </button>
+              <button
+                className={styles.downloadBtn}
+                onClick={handleDownloadExcel}
+                disabled={downloading}
+                style={{ background: '#2980b9' }}
+              >
+                {downloading ? 'Descargando...' : 'Descargar Excel'}
+              </button>
+            </div>
           )}
         </div>
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authMiddleware } from '../middleware/auth.js';
+import ExcelJS from 'exceljs';
 
 const router = Router();
 
@@ -426,6 +427,133 @@ router.post('/dashboard/multi-rows', async (req, res) => {
   } catch (err) {
     console.error('Multi-rows error:', err);
     res.status(500).json({ error: 'Failed to fetch multi-rows' });
+  }
+});
+
+// ---- Excel export helpers ----
+function rowsToExcelWorkbook(rows) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Datos');
+  sheet.columns = CSV_COLUMNS.map((c) => ({
+    header: c.label,
+    key: c.field,
+    width: c.field === 'candidato' || c.field === 'nomPuesto' ? 25 : 15,
+  }));
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C3E6B' } };
+  headerRow.alignment = { horizontal: 'center' };
+  for (const row of rows) {
+    sheet.addRow(row);
+  }
+  return workbook;
+}
+
+// GET /api/dashboard/rows/excel — download filtered rows as Excel
+router.get('/dashboard/rows/excel', async (req, res) => {
+  try {
+    const query = { ...req.query };
+    const diferencia = query.diferencia;
+    delete query.diferencia;
+    delete query.page;
+    delete query.limit;
+
+    const where = buildWhere(query);
+
+    let extraCondition = '';
+    if (diferencia === 'ganando') {
+      extraCondition = ` AND (row_data->>'Diferencia')::numeric > 0`;
+    } else if (diferencia === 'perdiendo') {
+      extraCondition = ` AND (row_data->>'Diferencia')::numeric < 0`;
+    }
+
+    const result = await pool.query(
+      `SELECT row_data FROM csv_rows WHERE completed = FALSE ${where.text}${extraCondition} ORDER BY row_index`,
+      where.values
+    );
+
+    const workbook = rowsToExcelWorkbook(result.rows.map((r) => r.row_data));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="datos.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Excel download error:', err);
+    res.status(500).json({ error: 'Failed to generate Excel' });
+  }
+});
+
+// POST /api/dashboard/multi-rows/excel — download multi-filter rows as Excel
+router.post('/dashboard/multi-rows/excel', async (req, res) => {
+  try {
+    const { blocks } = req.body;
+    if (!blocks || !Array.isArray(blocks) || blocks.length === 0) {
+      const workbook = rowsToExcelWorkbook([]);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="datos.xlsx"');
+      await workbook.xlsx.write(res);
+      return res.end();
+    }
+
+    const unionParts = [];
+    const allValues = [];
+    let p = 1;
+
+    for (const block of blocks) {
+      const conditions = [];
+      const exact = [
+        ['nomCorporacion', 'nomCorporacion'],
+        ['nomDepartamento', 'nomDepartamento'],
+        ['nomMunicipio', 'nomMunicipio'],
+        ['zona', 'zona'],
+        ['codPuesto', 'codPuesto'],
+        ['mesa', 'mesa'],
+      ];
+
+      for (const [param, field] of exact) {
+        if (block[param]) {
+          conditions.push(`row_data->>'${field}' = $${p}`);
+          allValues.push(block[param]);
+          p++;
+        }
+      }
+
+      if (block.nomLista) {
+        conditions.push(`row_data->>'nomLista' ILIKE $${p}`);
+        allValues.push(`%${block.nomLista}%`);
+        p++;
+      }
+
+      if (block.nomCandidato) {
+        conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
+        allValues.push(`%${block.nomCandidato}%`);
+        p++;
+      }
+
+      if (block.diferencia === 'ganando') {
+        conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
+      } else if (block.diferencia === 'perdiendo') {
+        conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
+      }
+
+      const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    }
+
+    const combined = unionParts.join(' UNION ');
+    const result = await pool.query(
+      `SELECT row_data FROM (${combined}) AS combined ORDER BY row_index`,
+      allValues
+    );
+
+    const workbook = rowsToExcelWorkbook(result.rows.map((r) => r.row_data));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="datos.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Multi Excel download error:', err);
+    res.status(500).json({ error: 'Failed to generate Excel' });
   }
 });
 
