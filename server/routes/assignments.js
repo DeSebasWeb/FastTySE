@@ -187,7 +187,7 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
         p++;
       }
       if (block.nomCandidato) {
-        conditions.push(`row_data->>'candidato' ILIKE $${p}`);
+        conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
         allValues.push(`%${block.nomCandidato}%`);
         p++;
       }
@@ -412,7 +412,7 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
         if (block[param]) { conditions.push(`row_data->>'${field}' = $${p}`); allValues.push(block[param]); p++; }
       }
       if (block.nomLista) { conditions.push(`row_data->>'nomLista' ILIKE $${p}`); allValues.push(`%${block.nomLista}%`); p++; }
-      if (block.nomCandidato) { conditions.push(`row_data->>'candidato' ILIKE $${p}`); allValues.push(`%${block.nomCandidato}%`); p++; }
+      if (block.nomCandidato) { conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`); allValues.push(`%${block.nomCandidato}%`); p++; }
       if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
       else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
       const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';

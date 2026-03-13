@@ -37,7 +37,7 @@ function buildWhere(query, startParam = 1) {
   }
 
   if (query.nomCandidato) {
-    conditions.push(`row_data->>'candidato' ILIKE $${p}`);
+    conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
     values.push(`%${query.nomCandidato}%`);
     p++;
   }
@@ -298,7 +298,7 @@ router.post('/dashboard/multi-rows/csv', async (req, res) => {
       }
 
       if (block.nomCandidato) {
-        conditions.push(`row_data->>'candidato' ILIKE $${p}`);
+        conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
         allValues.push(`%${block.nomCandidato}%`);
         p++;
       }
@@ -373,7 +373,7 @@ router.post('/dashboard/multi-rows', async (req, res) => {
       }
 
       if (block.nomCandidato) {
-        conditions.push(`row_data->>'candidato' ILIKE $${p}`);
+        conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
         allValues.push(`%${block.nomCandidato}%`);
         p++;
       }
@@ -420,7 +420,7 @@ router.post('/dashboard/multi-rows', async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
-      rows: rowsResult.rows.map((r) => r.row_data),
+      rows: rowsResult.rows.map((r) => ({ ...r.row_data, _rn: Number(r.rn) })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {

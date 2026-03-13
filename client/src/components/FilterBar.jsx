@@ -75,7 +75,7 @@ export default function FilterBar({ filters, options, setFilter, clearFilters, e
 
         <input
           type="text"
-          placeholder="Buscar candidato..."
+          placeholder="Candidato (nombre o código)..."
           value={filters.nomCandidato || ''}
           onChange={(e) => setFilter('nomCandidato', e.target.value)}
           className={`${styles.input} ${styles.partyInput}`}
