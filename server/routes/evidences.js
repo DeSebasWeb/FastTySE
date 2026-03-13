@@ -30,15 +30,43 @@ router.post('/evidences', authMiddleware, async (req, res) => {
 });
 
 // GET /api/evidences/:assignmentId — get all evidences for an assignment
+// Admin with ?siblings=true gets evidences from all assignments sharing same filters
 router.get('/evidences/:assignmentId', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM evidences WHERE assignment_id = $1 ORDER BY row_index`,
-      [req.params.assignmentId]
-    );
+    const assignmentId = req.params.assignmentId;
+    let result;
+
+    if (req.query.siblings === 'true' && req.user.rol === 'Administrador') {
+      // Get the filters of this assignment, then find all sibling assignment IDs
+      const target = await pool.query(
+        `SELECT filters FROM assignments WHERE id = $1`, [assignmentId]
+      );
+      if (target.rows.length === 0) return res.status(404).json({ error: 'Assignment not found' });
+
+      const siblingIds = await pool.query(
+        `SELECT id FROM assignments WHERE filters = $1::jsonb`,
+        [JSON.stringify(target.rows[0].filters)]
+      );
+      const ids = siblingIds.rows.map((r) => r.id);
+
+      result = await pool.query(
+        `SELECT * FROM evidences WHERE assignment_id = ANY($1) ORDER BY row_index`,
+        [ids]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT * FROM evidences WHERE assignment_id = $1 ORDER BY row_index`,
+        [assignmentId]
+      );
+    }
+
     const map = {};
     for (const row of result.rows) {
-      map[row.row_index] = row;
+      // If multiple evidences exist for the same row_index (from different siblings),
+      // prefer the one with status 'uploaded' over others
+      if (!map[row.row_index] || (row.status === 'uploaded' && map[row.row_index].status !== 'uploaded')) {
+        map[row.row_index] = row;
+      }
     }
     res.json(map);
   } catch (err) {

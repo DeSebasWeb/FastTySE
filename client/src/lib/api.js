@@ -139,8 +139,9 @@ export async function saveEvidence({ assignmentId, rowIndex, status, imageData, 
   return res.data;
 }
 
-export async function getEvidences(assignmentId) {
-  const res = await api.get(`/evidences/${assignmentId}`);
+export async function getEvidences(assignmentId, { siblings = false } = {}) {
+  const params = siblings ? { siblings: 'true' } : {};
+  const res = await api.get(`/evidences/${assignmentId}`, { params });
   return res.data;
 }
 
