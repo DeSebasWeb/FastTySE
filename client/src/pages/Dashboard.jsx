@@ -179,7 +179,7 @@ export default function Dashboard() {
 
       if (queue.length > 0) {
         const blocks = queue.map((q) => q.filters);
-        url = '/api/dashboard/multi-rows/csv';
+        url = `${import.meta.env.BASE_URL}api/dashboard/multi-rows/csv`;
         fetchOpts = {
           method: 'POST',
           headers: {
@@ -194,7 +194,7 @@ export default function Dashboard() {
           if (v != null && v !== '') params.set(k, v);
         }
         if (filters.diferencia) params.set('diferencia', filters.diferencia);
-        url = `/api/dashboard/rows/csv?${params.toString()}`;
+        url = `${import.meta.env.BASE_URL}api/dashboard/rows/csv?${params.toString()}`;
         fetchOpts = {
           headers: { Authorization: `Bearer ${token}` },
         };
