@@ -7,7 +7,7 @@ import { useUploads } from '../hooks/useUploads.js';
 import styles from './Home.module.css';
 
 export default function Home() {
-  const { uploads, loading } = useUploads();
+  const { uploads, loading, refetch } = useUploads();
   const [selectedId, setSelectedId] = useState(null);
 
   const selectedUpload = uploads.find((u) => u.id === selectedId) || null;
@@ -24,6 +24,7 @@ export default function Home() {
             loading={loading}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onRefresh={refetch}
           />
         </section>
 

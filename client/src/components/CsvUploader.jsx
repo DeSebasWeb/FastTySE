@@ -7,13 +7,14 @@ export default function CsvUploader() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [markCompleted, setMarkCompleted] = useState(false);
   const inputRef = useRef(null);
 
   async function processFile(file) {
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith('.csv')) {
-      setError('Only .csv files are allowed');
+      setError('Solo se permiten archivos .csv');
       setSuccess(null);
       return;
     }
@@ -23,8 +24,17 @@ export default function CsvUploader() {
     setProgress(0);
 
     try {
-      const result = await uploadCsv(file, setProgress);
-      setSuccess(`Uploaded "${result.filename}" — ${result.rowCount} rows, ${result.columns.length} columns`);
+      const result = await uploadCsv(file, setProgress, { markCompleted });
+      const parts = [`"${result.filename}"`];
+      if (result.fechaCsv) parts.push(`Fecha: ${result.fechaCsv}`);
+      parts.push(`${result.rowCount} filas en CSV`);
+      if (markCompleted) {
+        parts.push(`${result.insertedCount} marcadas como completadas`);
+      } else {
+        if (result.insertedCount != null) parts.push(`${result.insertedCount} nuevas`);
+        if (result.skippedCount > 0) parts.push(`${result.skippedCount} duplicadas (omitidas)`);
+      }
+      setSuccess(parts.join(' — '));
       setProgress(null);
     } catch (err) {
       const msg = err.response?.data?.error || 'Upload failed';
@@ -72,9 +82,18 @@ export default function CsvUploader() {
           className={styles.hiddenInput}
         />
         <p className={styles.dropText}>
-          {dragging ? 'Drop your CSV here' : 'Drag & drop a CSV file or click to browse'}
+          {dragging ? 'Suelta el CSV aquí' : 'Arrastra un CSV o haz clic para seleccionar'}
         </p>
       </div>
+
+      <label className={styles.checkRow} onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={markCompleted}
+          onChange={(e) => setMarkCompleted(e.target.checked)}
+        />
+        <span>Este CSV ya fue trabajado (marcar como completado)</span>
+      </label>
 
       {progress !== null && (
         <div className={styles.progressBar}>

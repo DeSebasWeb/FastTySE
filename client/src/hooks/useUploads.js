@@ -30,6 +30,8 @@ export function useUploads() {
             columns: payload.columns,
             row_count: payload.rowCount,
             uploaded_at: payload.uploadedAt,
+            fecha_csv: payload.fechaCsv || null,
+            completed_count: 0,
           },
           ...prev,
         ];

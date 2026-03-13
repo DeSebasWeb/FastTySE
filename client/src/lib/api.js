@@ -11,9 +11,10 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-export async function uploadCsv(file, onProgress) {
+export async function uploadCsv(file, onProgress, { markCompleted = false } = {}) {
   const formData = new FormData();
   formData.append('file', file);
+  if (markCompleted) formData.append('markCompleted', '1');
   const res = await api.post('/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
@@ -39,6 +40,16 @@ export async function getRows(uploadId, page = 1, limit = 100) {
 
 export async function deleteUpload(uploadId) {
   const res = await api.delete(`/uploads/${uploadId}`);
+  return res.data;
+}
+
+export async function markUploadCompleted(uploadId) {
+  const res = await api.post(`/uploads/${uploadId}/mark-completed`);
+  return res.data;
+}
+
+export async function unmarkUploadCompleted(uploadId) {
+  const res = await api.post(`/uploads/${uploadId}/unmark-completed`);
   return res.data;
 }
 
@@ -113,6 +124,11 @@ export async function deleteAssignment(id) {
 
 export async function getAssignmentSiblings(id) {
   const res = await api.get(`/assignments/${id}/siblings`);
+  return res.data;
+}
+
+export async function getAssignmentsProgress() {
+  const res = await api.get('/assignments/progress');
   return res.data;
 }
 

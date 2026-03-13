@@ -44,11 +44,76 @@
   color: var(--text-muted);
 }
 
+.filenameRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.completedItem {
+  opacity: 0.65;
+  border-color: var(--success, #27ae60);
+}
+
+.completedBadge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--success, #27ae60);
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: 1rem;
+}
+
+.markBtn {
+  background: var(--success, #27ae60);
+  color: #fff;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+  white-space: nowrap;
+}
+
+.markBtn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.markBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unmarkBtn {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+  white-space: nowrap;
+}
+
+.unmarkBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.unmarkBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .deleteBtn {
   background: var(--danger);
   color: #fff;
   flex-shrink: 0;
-  margin-left: 1rem;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
 }
 
 .deleteBtn:hover {

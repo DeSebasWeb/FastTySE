@@ -58,6 +58,23 @@
   color: #fff;
 }
 
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkRow input[type="checkbox"] {
+  accent-color: var(--success, #27ae60);
+  width: 1rem;
+  height: 1rem;
+}
+
 .error {
   margin-top: 0.75rem;
   color: var(--danger);
