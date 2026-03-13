@@ -63,7 +63,7 @@ export default function MyAssignments() {
 
     Promise.all([
       getMultiRows(blocks, page, 100, rangeOpts),
-      page === 1 ? getEvidences(selected.id) : Promise.resolve(null),
+      page === 1 ? getEvidences(selected.id, { siblings: isAdmin }) : Promise.resolve(null),
     ])
       .then(([data, evMap]) => {
         setRows(data.rows);
@@ -78,7 +78,7 @@ export default function MyAssignments() {
   // Load evidences when assignment changes
   useEffect(() => {
     if (!selected) return;
-    getEvidences(selected.id).then(setEvidences).catch(console.error);
+    getEvidences(selected.id, { siblings: isAdmin }).then(setEvidences).catch(console.error);
   }, [selected?.id]);
 
   // Reset on assignment change
@@ -282,9 +282,10 @@ export default function MyAssignments() {
   }, [evidences, total, selected]);
 
   // Filter rows by evidence status — preserve original global index
+  // Use _rn (ROW_NUMBER from server) when available for correct global numbering
   const filteredRows = useMemo(() => {
     const pageStart = (page - 1) * 100 + 1;
-    const tagged = rows.map((row, i) => ({ ...row, _globalIndex: pageStart + i }));
+    const tagged = rows.map((row, i) => ({ ...row, _globalIndex: row._rn ?? (pageStart + i) }));
     if (statusFilter === 'all') return tagged;
     return tagged.filter((row) => {
       const ev = evidences[row._globalIndex];
@@ -336,7 +337,7 @@ export default function MyAssignments() {
     const pending = [];
     const pageStart = (page - 1) * 100 + 1;
     for (let i = 0; i < rows.length; i++) {
-      const gi = pageStart + i;
+      const gi = rows[i]._rn ?? (pageStart + i);
       if (!evidences[gi]) pending.push(gi);
     }
     if (pending.length === 0) { alert('No hay filas pendientes en esta página'); return; }
