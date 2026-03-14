@@ -87,12 +87,19 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
   const [autoE14Label, setAutoE14Label] = useState('');
   const dropRef = useRef(null);
 
+  // E24 state
+  const [imageDataE24, setImageDataE24] = useState(evidence?.image_data_e24 || null);
+  const [rotationE24, setRotationE24] = useState(evidence?.rotation_e24 || 0);
+  const dropRefE24 = useRef(null);
+
   // Reset state when evidence changes (navigation)
   useEffect(() => {
     setEditing(!evidence?.status || evidence?.status !== 'uploaded');
     setImageData(evidence?.image_data || null);
     setRotation(evidence?.rotation || 0);
     setObservations(evidence?.observations || '');
+    setImageDataE24(evidence?.image_data_e24 || null);
+    setRotationE24(evidence?.rotation_e24 || 0);
     setAutoE14Status('idle');
     autoE14StatusRef.current = 'idle';
     setAutoE14Label('');
@@ -177,14 +184,19 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
         if (item.type.startsWith('image/')) {
           e.preventDefault();
           const file = item.getAsFile();
-          readFile(file);
+          // If E14 already has an image, paste goes to E24
+          if (imageData) {
+            readFileE24(file);
+          } else {
+            readFile(file);
+          }
           break;
         }
       }
     }
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, [editing, readOnly]);
+  }, [editing, readOnly, imageData]);
 
   function readFile(file) {
     const reader = new FileReader();
@@ -206,6 +218,25 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
 
   function rotateLeft() { setRotation((r) => (r - 90 + 360) % 360); }
   function rotateRight() { setRotation((r) => (r + 90) % 360); }
+
+  // E24 helpers
+  function readFileE24(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => setImageDataE24(e.target.result);
+    reader.readAsDataURL(file);
+  }
+  function handleDropE24(e) {
+    e.preventDefault();
+    if (readOnly || !editing) return;
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) readFileE24(file);
+  }
+  function handleFileSelectE24(e) {
+    const file = e.target.files[0];
+    if (file) readFileE24(file);
+  }
+  function rotateLeftE24() { setRotationE24((r) => (r - 90 + 360) % 360); }
+  function rotateRightE24() { setRotationE24((r) => (r + 90) % 360); }
 
   function openAnnotator() {
     if (rotation !== 0) {
@@ -237,6 +268,8 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
         imageData: status === 'uploaded' ? imageData : null,
         rotation: status === 'uploaded' ? rotation : 0,
         observations: observations || null,
+        imageDataE24: status === 'uploaded' ? (imageDataE24 || null) : null,
+        rotationE24: status === 'uploaded' ? (rotationE24 || 0) : 0,
       });
       onClose();
     } catch (err) {
@@ -270,15 +303,18 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
   // ---- READ ONLY MODE (Admin viewing) ----
   if (readOnly) {
     const rotationChanged = rotation !== (evidence?.rotation || 0);
+    const rotationE24Changed = rotationE24 !== (evidence?.rotation_e24 || 0);
+    const anyRotationChanged = rotationChanged || rotationE24Changed;
 
     async function handleSaveRotation() {
       if (!evidence?.id) return;
       setSaving(true);
       try {
-        // Use batch-rotate endpoint directly by evidence ID — avoids creating
-        // duplicate evidence when admin rotates a sibling's evidence
-        await batchRotateEvidences([evidence.id], rotation);
-        onRotateSave?.(evidence.row_index, rotation);
+        const promises = [];
+        if (rotationChanged) promises.push(batchRotateEvidences([evidence.id], rotation, 'e14'));
+        if (rotationE24Changed) promises.push(batchRotateEvidences([evidence.id], rotationE24, 'e24'));
+        await Promise.all(promises);
+        onRotateSave?.(evidence.row_index, rotation, rotationE24);
         onClose();
       } catch (err) {
         console.error(err);
@@ -309,7 +345,26 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
               ) : (
                 <p style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>Cargando imagen...</p>
               )}
-              {rotationChanged && (
+              {evidence.observations && (
+                <div className={styles.field}>
+                  <label className={styles.label}>Observaciones</label>
+                  <p className={styles.obsText}>{evidence.observations}</p>
+                </div>
+              )}
+              {evidence.image_data_e24 && (
+                <>
+                  <div className={styles.sectionDivider}><span className={styles.sectionLabel}>Formulario E-24</span></div>
+                  <ImageViewer
+                    src={evidence.image_data_e24}
+                    rotation={rotationE24}
+                    size="large"
+                    showRotate
+                    onRotateLeft={rotateLeftE24}
+                    onRotateRight={rotateRightE24}
+                  />
+                </>
+              )}
+              {anyRotationChanged && (
                 <div style={{ textAlign: 'center', padding: '0.5rem' }}>
                   <button
                     className={styles.saveBtn}
@@ -318,12 +373,6 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
                   >
                     {saving ? 'Guardando...' : 'Guardar rotación'}
                   </button>
-                </div>
-              )}
-              {evidence.observations && (
-                <div className={styles.field}>
-                  <label className={styles.label}>Observaciones</label>
-                  <p className={styles.obsText}>{evidence.observations}</p>
                 </div>
               )}
             </>
@@ -361,6 +410,13 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
             />
           </div>
 
+          {imageDataE24 && (
+            <>
+              <div className={styles.sectionDivider}><span className={styles.sectionLabel}>Formulario E-24</span></div>
+              <ImageViewer src={imageDataE24} rotation={rotationE24} size="large" />
+            </>
+          )}
+
           <div className={styles.actions}>
             <button className={styles.annotateBtn} onClick={() => { setEditing(true); openAnnotator(); }}>Anotar imagen</button>
             <button
@@ -368,7 +424,7 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
               onClick={async () => {
                 setSaving(true);
                 try {
-                  await onSave({ status: 'uploaded', imageData, rotation, observations: observations || null });
+                  await onSave({ status: 'uploaded', imageData, rotation, observations: observations || null, imageDataE24: imageDataE24 || null, rotationE24: rotationE24 || 0 });
                   onClose();
                 } catch (err) { console.error(err); } finally { setSaving(false); }
               }}
@@ -470,6 +526,57 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
           />
         </div>
 
+        {/* E24 section — only when E14 image is loaded */}
+        {imageData && (
+          <>
+            <div className={styles.sectionDivider}><span className={styles.sectionLabel}>Formulario E-24 (opcional)</span></div>
+            {imageDataE24 ? (
+              <>
+                <ImageViewer
+                  src={imageDataE24}
+                  rotation={rotationE24}
+                  size="small"
+                  showRotate
+                  onRotateLeft={rotateLeftE24}
+                  onRotateRight={rotateRightE24}
+                  extraTools={
+                    <button className={styles.removeE24Btn} onClick={() => setImageDataE24(null)}>Quitar E24</button>
+                  }
+                />
+                <div
+                  ref={dropRefE24}
+                  className={styles.e24DropZone}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDropE24}
+                  style={{ minHeight: '40px', padding: '0.4rem' }}
+                >
+                  <div className={styles.placeholder}>
+                    <label className={styles.fileLabel}>
+                      Cambiar E24
+                      <input type="file" accept="image/*" onChange={handleFileSelectE24} hidden />
+                    </label>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div
+                ref={dropRefE24}
+                className={styles.e24DropZone}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDropE24}
+              >
+                <div className={styles.placeholder}>
+                  <p>Arrastra el E-24 o</p>
+                  <label className={styles.fileLabel}>
+                    Seleccionar archivo E24
+                    <input type="file" accept="image/*" onChange={handleFileSelectE24} hidden />
+                  </label>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
         <div className={styles.actions}>
           <button
             className={styles.saveBtn}
@@ -486,7 +593,7 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
           {hasExisting && (
             <button
               className={styles.noEvidenceBtn}
-              onClick={() => { setEditing(false); setImageData(evidence?.image_data || null); setRotation(evidence?.rotation || 0); setObservations(evidence?.observations || ''); }}
+              onClick={() => { setEditing(false); setImageData(evidence?.image_data || null); setRotation(evidence?.rotation || 0); setObservations(evidence?.observations || ''); setImageDataE24(evidence?.image_data_e24 || null); setRotationE24(evidence?.rotation_e24 || 0); }}
             >
               Cancelar
             </button>

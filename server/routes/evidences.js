@@ -7,19 +7,19 @@ const router = Router();
 // POST /api/evidences — save or update evidence for a row
 router.post('/evidences', authMiddleware, async (req, res) => {
   try {
-    const { assignmentId, rowIndex, status, imageData, rotation, observations } = req.body;
+    const { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 } = req.body;
 
     if (!assignmentId || rowIndex == null || !status) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const result = await pool.query(
-      `INSERT INTO evidences (assignment_id, row_index, status, image_data, rotation, observations, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `INSERT INTO evidences (assignment_id, row_index, status, image_data, rotation, observations, image_data_e24, rotation_e24, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (assignment_id, row_index)
-       DO UPDATE SET status = $3, image_data = $4, rotation = $5, observations = $6, updated_at = NOW()
+       DO UPDATE SET status = $3, image_data = $4, rotation = $5, observations = $6, image_data_e24 = $7, rotation_e24 = $8, updated_at = NOW()
        RETURNING *`,
-      [assignmentId, rowIndex, status, imageData || null, rotation || 0, observations || null]
+      [assignmentId, rowIndex, status, imageData || null, rotation || 0, observations || null, imageDataE24 || null, rotationE24 || 0]
     );
 
     res.json(result.rows[0]);
@@ -30,7 +30,7 @@ router.post('/evidences', authMiddleware, async (req, res) => {
 });
 
 // Columns to return in the list endpoint (excludes heavy image_data)
-const LIST_COLS = 'id, assignment_id, row_index, status, rotation, observations, updated_at';
+const LIST_COLS = 'id, assignment_id, row_index, status, rotation, rotation_e24, observations, updated_at, (image_data_e24 IS NOT NULL) AS has_e24';
 
 // GET /api/evidences/detail/:id — get a single evidence WITH image_data (for modal)
 // Must be registered BEFORE /:assignmentId to avoid route conflict
@@ -105,7 +105,7 @@ router.post('/evidences/batch-detail', authMiddleware, async (req, res) => {
     // Limit to 50 at a time to avoid huge payloads
     const limited = ids.slice(0, 50);
     const result = await pool.query(
-      `SELECT id, assignment_id, row_index, status, image_data, rotation, observations, updated_at
+      `SELECT id, assignment_id, row_index, status, image_data, rotation, observations, updated_at, image_data_e24, rotation_e24
        FROM evidences WHERE id = ANY($1)`,
       [limited]
     );
@@ -124,12 +124,13 @@ router.post('/evidences/batch-detail', authMiddleware, async (req, res) => {
 // PATCH /api/evidences/batch-rotate — set rotation for multiple evidences at once
 router.patch('/evidences/batch-rotate', authMiddleware, async (req, res) => {
   try {
-    const { ids, rotation } = req.body;
+    const { ids, rotation, target } = req.body;
     if (!Array.isArray(ids) || ids.length === 0 || rotation == null) {
       return res.status(400).json({ error: 'ids array and rotation required' });
     }
     const validRotation = [0, 90, 180, 270].includes(rotation) ? rotation : 0;
     const limited = ids.slice(0, 200);
+    const col = target === 'e24' ? 'rotation_e24' : 'rotation';
 
     // Authorization: analysts can only rotate their own evidences
     if (req.user.rol !== 'Administrador') {
@@ -145,9 +146,9 @@ router.patch('/evidences/batch-rotate', authMiddleware, async (req, res) => {
     }
 
     const result = await pool.query(
-      `UPDATE evidences SET rotation = $1, updated_at = NOW()
+      `UPDATE evidences SET ${col} = $1, updated_at = NOW()
        WHERE id = ANY($2)
-       RETURNING id, row_index, rotation`,
+       RETURNING id, row_index, rotation, rotation_e24`,
       [validRotation, limited]
     );
     res.json(result.rows);

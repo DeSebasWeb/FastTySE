@@ -139,8 +139,8 @@ export async function getAssignmentsProgress() {
 
 // --- Evidences API ---
 
-export async function saveEvidence({ assignmentId, rowIndex, status, imageData, rotation, observations }) {
-  const res = await api.post('/evidences', { assignmentId, rowIndex, status, imageData, rotation, observations });
+export async function saveEvidence({ assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 }) {
+  const res = await api.post('/evidences', { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 });
   return res.data;
 }
 
@@ -165,8 +165,8 @@ export async function batchLoadEvidenceDetails(ids) {
   return res.data;
 }
 
-export async function batchRotateEvidences(ids, rotation) {
-  const res = await api.patch('/evidences/batch-rotate', { ids, rotation });
+export async function batchRotateEvidences(ids, rotation, target = 'e14') {
+  const res = await api.patch('/evidences/batch-rotate', { ids, rotation, target });
   return res.data;
 }
 

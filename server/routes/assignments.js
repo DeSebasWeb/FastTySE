@@ -362,6 +362,64 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
           </div>
         </div>
       `);
+
+      // E24 second page (if exists)
+      if (ev.image_data_e24) {
+        const rotationE24 = [0, 90, 180, 270].includes(ev.rotation_e24) ? ev.rotation_e24 : 0;
+        pages.push(`
+          <div class="page">
+            <div class="header-section">
+              ${noReclamarBanner}
+              <h1 class="report-title">${escapeHtml(title)}</h1>
+              <hr class="title-line"/>
+              <div class="date-row">Fecha: ${fecha}</div>
+              <table class="info-table">
+                <thead>
+                  <tr>
+                    <th>Departamento</th>
+                    <th>Municipio</th>
+                    <th>Zona</th>
+                    <th>Puesto</th>
+                    <th>Mesa</th>
+                    <th>Partido</th>
+                    <th>Candidato</th>
+                    <th>E14</th>
+                    <th>Votos Escrutinio<br/>(MMV)</th>
+                    <th>Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>${escapeHtml(row.nomDepartamento)}</td>
+                    <td>${escapeHtml(row.nomMunicipio)}</td>
+                    <td>${escapeHtml(row.zona)}</td>
+                    <td>${escapeHtml(row.nomPuesto)}</td>
+                    <td>${escapeHtml(row.mesa)}</td>
+                    <td>${escapeHtml(row.nomLista)}</td>
+                    <td>${escapeHtml(row.candidato)}</td>
+                    <td>${escapeHtml(row['Votos E14'])}</td>
+                    <td>${escapeHtml(row['Votos MMV'])}</td>
+                    <td>${difLabel}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="section-title">1. Evidencias Documentales</div>
+              <div class="formulario-label">Formulario E-24</div>
+              <hr class="blue-line"/>
+            </div>
+
+            <div class="image-section">
+              <div class="img-rotate-wrapper rot-${rotationE24}">
+                <img src="${ev.image_data_e24}" alt="Formulario E-24"/>
+              </div>
+            </div>
+
+            <div class="footer">
+              Documento generado por Auditoría Escrutinio Congreso 2026 — ${now.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}
+            </div>
+          </div>
+        `);
+      }
     }
 
     if (pages.length === 0) {
@@ -564,9 +622,11 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
   .page {
     width: 210mm; height: 297mm;
     padding: 12mm 14mm 10mm 14mm;
+    page-break-after: always;
     display: flex; flex-direction: column;
     overflow: hidden;
   }
+  .page:last-child { page-break-after: avoid; }
   .header-section { flex-shrink: 0; }
   .report-title { font-size: 16px; font-weight: 900; text-align: center; color: #1a2744; letter-spacing: 0.5px; margin-bottom: 6px; }
   .title-line { border: none; border-top: 2px solid #1a2744; margin-bottom: 6px; }
@@ -629,7 +689,35 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
   ${ev.observations ? `<div class="obs-section"><div class="obs-title">Observaciones</div><hr class="obs-line"/>
   <div class="obs-content"><div class="obs-bar"></div><span>${escapeHtml(ev.observations)}</span></div></div>` : ''}
   <div class="footer">Documento generado por Auditoría Escrutinio Congreso 2026 — ${now.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}</div>
-</div></body></html>`;
+</div>
+${ev.image_data_e24 ? (() => {
+  const rotE24 = [0, 90, 180, 270].includes(ev.rotation_e24) ? ev.rotation_e24 : 0;
+  return `<div class="page">
+  <div class="header-section">
+    ${noReclamarBanner}
+    <h1 class="report-title">${escapeHtml(title)}</h1>
+    <hr class="title-line"/>
+    <div class="date-row">Fecha: ${fecha}</div>
+    <table class="info-table"><thead><tr>
+      <th>Departamento</th><th>Municipio</th><th>Zona</th><th>Puesto</th><th>Mesa</th>
+      <th>Partido</th><th>Candidato</th><th>E14</th><th>Votos Escrutinio<br/>(MMV)</th><th>Diferencia</th>
+    </tr></thead><tbody><tr>
+      <td>${escapeHtml(row.nomDepartamento)}</td><td>${escapeHtml(row.nomMunicipio)}</td>
+      <td>${escapeHtml(row.zona)}</td><td>${escapeHtml(row.nomPuesto)}</td><td>${escapeHtml(row.mesa)}</td>
+      <td>${escapeHtml(row.nomLista)}</td><td>${escapeHtml(row.candidato)}</td>
+      <td>${escapeHtml(row['Votos E14'])}</td><td>${escapeHtml(row['Votos MMV'])}</td><td>${difLabel}</td>
+    </tr></tbody></table>
+    <div class="section-title">1. Evidencias Documentales</div>
+    <div class="formulario-label">Formulario E-24</div>
+    <hr class="blue-line"/>
+  </div>
+  <div class="image-section">
+    <div class="img-rotate-wrapper rot-${rotE24}"><img src="${ev.image_data_e24}" alt="Formulario E-24"/></div>
+  </div>
+  <div class="footer">Documento generado por Auditoría Escrutinio Congreso 2026 — ${now.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}</div>
+</div>`;
+})() : ''}
+</body></html>`;
 
     let browser;
     try {

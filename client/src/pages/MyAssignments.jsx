@@ -196,7 +196,7 @@ export default function MyAssignments() {
     }
   }
 
-  async function handleSaveEvidence({ status, imageData, rotation, observations }) {
+  async function handleSaveEvidence({ status, imageData, rotation, observations, imageDataE24, rotationE24 }) {
     if (!modalRow || !selected) return;
     const result = await saveEvidence({
       assignmentId: selected.id,
@@ -205,6 +205,8 @@ export default function MyAssignments() {
       imageData,
       rotation,
       observations,
+      imageDataE24,
+      rotationE24,
     });
     setEvidences((prev) => ({ ...prev, [modalRow.rowIndex]: result }));
   }
@@ -546,7 +548,7 @@ export default function MyAssignments() {
                     textDecoration: ev?.status === 'uploaded' ? 'underline' : 'none',
                   }}
                 >
-                  {label}{ev?.rotation ? ` (${ev.rotation}°)` : ''}
+                  {label}{ev?.rotation ? ` (${ev.rotation}°)` : ''}{(ev?.has_e24 || ev?.image_data_e24) ? ' +E24' : ''}
                 </button>
                 {ev?.status === 'uploaded' && (
                   <>
@@ -1073,10 +1075,12 @@ export default function MyAssignments() {
           onDelete={handleDeleteEvidence}
           onClose={() => setModalRow(null)}
           readOnly={isAdmin}
-          onRotateSave={(rowIndex, newRotation) => {
+          onRotateSave={(rowIndex, newRotation, newRotationE24) => {
             setEvidences((prev) => {
               if (!prev[rowIndex]) return prev;
-              return { ...prev, [rowIndex]: { ...prev[rowIndex], rotation: newRotation } };
+              const updated = { ...prev[rowIndex], rotation: newRotation };
+              if (newRotationE24 != null) updated.rotation_e24 = newRotationE24;
+              return { ...prev, [rowIndex]: updated };
             });
           }}
           rowLabel={`Fila ${modalRow.rowIndex} de ${total}`}
