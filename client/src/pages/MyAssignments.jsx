@@ -46,6 +46,12 @@ export default function MyAssignments() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
+  // Admin: search & collapse
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const [showProgress, setShowProgress] = useState(false);
+  const [showRanges, setShowRanges] = useState(false);
+
   useEffect(() => {
     getAssignments()
       .then(setAssignments)
@@ -504,8 +510,27 @@ export default function MyAssignments() {
   // Extra columns: evidence status for both admin and analyst
   const extraColumns = useMemo(() => {
     if (!selected) return undefined;
-    return [
-      {
+    const cols = [];
+
+    // Admin only: show which analyst owns each row
+    if (isAdmin && siblings.length > 0) {
+      cols.push({
+        id: '_assignedTo',
+        header: 'Asignado a',
+        cell: (info) => {
+          const globalIndex = info.row.original._globalIndex ?? ((page - 1) * 100 + info.row.index + 1);
+          const owner = siblings.find((s) => s.range_from && s.range_to && globalIndex >= s.range_from && globalIndex <= s.range_to);
+          if (!owner) return <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>—</span>;
+          return (
+            <span style={{ fontSize: '0.72rem', fontWeight: 500 }}>
+              {owner.user_name}
+            </span>
+          );
+        },
+      });
+    }
+
+    cols.push({
         id: '_evidence',
         header: 'Evidencia',
         cell: (info) => {
@@ -665,9 +690,10 @@ export default function MyAssignments() {
             </div>
           );
         },
-      },
-    ];
-  }, [selected, page, evidences, isAdmin, selectedEvIds]);
+      });
+
+    return cols;
+  }, [selected, page, evidences, isAdmin, selectedEvIds, siblings]);
 
   const assignedRanges = selected && isAdmin ? computeAssignedRanges() : [];
 
@@ -720,39 +746,128 @@ export default function MyAssignments() {
               </div>
             )}
 
-            {/* Admin: progress summary */}
+            {/* Admin: search bar + date filters + grid controls */}
+            {isAdmin && !loading && assignments.length > 0 && (
+              <div className={styles.adminToolbar}>
+                <div className={styles.adminToolbarRow}>
+                  <input
+                    type="text"
+                    placeholder="Buscar asignaciones..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className={styles.searchInput}
+                  />
+                  <button
+                    className={styles.collapseAllBtn}
+                    onClick={() => setExpandedGroups(new Set())}
+                  >
+                    Colapsar todo
+                  </button>
+                  <button
+                    className={styles.expandAllBtn}
+                    onClick={() => {
+                      const groups = {};
+                      for (const a of filteredAssignments) {
+                        if (!groups[a.label]) groups[a.label] = true;
+                      }
+                      setExpandedGroups(new Set(Object.keys(groups)));
+                    }}
+                  >
+                    Expandir todo
+                  </button>
+                </div>
+                <div className={styles.adminToolbarRow}>
+                  <div className={styles.quickDateGroup}>
+                    {[
+                      { label: 'Hoy', onClick: () => { const d = new Date().toISOString().slice(0, 10); setDateFrom(d); setDateTo(d); } },
+                      { label: 'Ayer', onClick: () => { const d = new Date(Date.now() - 86400000).toISOString().slice(0, 10); setDateFrom(d); setDateTo(d); } },
+                      { label: 'Últimos 3 días', onClick: () => { setDateFrom(new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)); setDateTo(new Date().toISOString().slice(0, 10)); } },
+                      { label: 'Esta semana', onClick: () => { const now = new Date(); const day = now.getDay() || 7; const mon = new Date(now); mon.setDate(now.getDate() - day + 1); setDateFrom(mon.toISOString().slice(0, 10)); setDateTo(now.toISOString().slice(0, 10)); } },
+                      { label: 'Todas', onClick: () => { setDateFrom(''); setDateTo(''); } },
+                    ].map((btn) => (
+                      <button
+                        key={btn.label}
+                        className={`${styles.quickDateBtn} ${
+                          btn.label === 'Todas' && !dateFrom && !dateTo ? styles.quickDateBtnActive : ''
+                        }`}
+                        onClick={btn.onClick}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.dateFilters}>
+                    <label className={styles.dateLabel}>
+                      Desde
+                      <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={styles.dateInput} />
+                    </label>
+                    <label className={styles.dateLabel}>
+                      Hasta
+                      <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={styles.dateInput} />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Admin: progress summary — collapsible + grid */}
             {isAdmin && progressData.length > 0 && !loading && (
               <div className={styles.progressPanel}>
-                <h3 className={styles.progressPanelTitle}>Progreso por analista</h3>
-                <div className={styles.progressTable}>
+                <div
+                  className={styles.progressPanelHeader}
+                  onClick={() => setShowProgress((v) => !v)}
+                >
+                  <span className={styles.progressChevron}>{showProgress ? '\u25BC' : '\u25B6'}</span>
+                  <h3 className={styles.progressPanelTitle}>Progreso por analista</h3>
                   {(() => {
-                    // Group by user_name
-                    const grouped = {};
-                    for (const r of progressData) {
-                      const name = r.user_name || 'Sin asignar';
-                      if (!grouped[name]) grouped[name] = { totalRows: 0, uploaded: 0, noEvidence: 0 };
-                      grouped[name].totalRows += Number(r.total_rows) || 0;
-                      grouped[name].uploaded += Number(r.uploaded) || 0;
-                      grouped[name].noEvidence += Number(r.no_evidence) || 0;
-                    }
-                    return Object.entries(grouped).map(([name, d]) => {
-                      const done = d.uploaded + d.noEvidence;
-                      const pct = d.totalRows > 0 ? Math.round((done / d.totalRows) * 100) : 0;
-                      return (
-                        <div key={name} className={styles.progressRow}>
-                          <span className={styles.progressName}>{name}</span>
-                          <div className={styles.progressBarSmall}>
-                            <div className={styles.progressFillSmall} style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className={styles.progressRowPct}>{pct}%</span>
-                          <span className={styles.progressRowDetail}>
-                            {done}/{d.totalRows}
-                          </span>
-                        </div>
-                      );
-                    });
+                    const totalAll = progressData.reduce((s, p) => s + (Number(p.total_rows) || 0), 0);
+                    const doneAll = progressData.reduce((s, p) => s + (Number(p.uploaded) || 0) + (Number(p.no_evidence) || 0), 0);
+                    const pctAll = totalAll > 0 ? Math.round((doneAll / totalAll) * 100) : 0;
+                    return (
+                      <span className={styles.progressPanelSummary}>
+                        {pctAll}% general — {doneAll}/{totalAll} filas
+                      </span>
+                    );
                   })()}
                 </div>
+                {showProgress && (
+                  <div className={styles.progressGrid}>
+                    {(() => {
+                      const grouped = {};
+                      for (const r of progressData) {
+                        const name = r.user_name || 'Sin asignar';
+                        if (!grouped[name]) grouped[name] = { totalRows: 0, uploaded: 0, noEvidence: 0 };
+                        grouped[name].totalRows += Number(r.total_rows) || 0;
+                        grouped[name].uploaded += Number(r.uploaded) || 0;
+                        grouped[name].noEvidence += Number(r.no_evidence) || 0;
+                      }
+                      return Object.entries(grouped)
+                        .sort((a, b) => {
+                          const pA = a[1].totalRows > 0 ? (a[1].uploaded + a[1].noEvidence) / a[1].totalRows : 0;
+                          const pB = b[1].totalRows > 0 ? (b[1].uploaded + b[1].noEvidence) / b[1].totalRows : 0;
+                          return pB - pA;
+                        })
+                        .map(([name, d]) => {
+                          const done = d.uploaded + d.noEvidence;
+                          const pct = d.totalRows > 0 ? Math.round((done / d.totalRows) * 100) : 0;
+                          return (
+                            <div key={name} className={styles.progressCell}>
+                              <div className={styles.progressCellTop}>
+                                <span className={styles.progressCellName}>{name}</span>
+                                <span className={`${styles.progressCellPct} ${pct === 100 ? styles.progressCellDone : ''}`}>
+                                  {pct}%
+                                </span>
+                              </div>
+                              <div className={styles.progressCellBar}>
+                                <div className={`${styles.progressCellFill} ${pct === 100 ? styles.progressCellFillDone : ''}`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className={styles.progressCellDetail}>{done}/{d.totalRows}</span>
+                            </div>
+                          );
+                        });
+                    })()}
+                  </div>
+                )}
               </div>
             )}
 
@@ -768,7 +883,130 @@ export default function MyAssignments() {
                   ? 'No tienes asignaciones completadas.'
                   : 'No hay asignaciones en este rango de fechas.'}
               </p>
+            ) : isAdmin ? (
+              // Admin: grouped grid with collapsible cards
+              (() => {
+                const term = searchTerm.toLowerCase().trim();
+                const filtered = term
+                  ? filteredAssignments.filter((a) =>
+                      a.label.toLowerCase().includes(term) ||
+                      (a.user_name || '').toLowerCase().includes(term)
+                    )
+                  : filteredAssignments;
+
+                const groups = {};
+                for (const a of filtered) {
+                  if (!groups[a.label]) groups[a.label] = [];
+                  groups[a.label].push(a);
+                }
+
+                const entries = Object.entries(groups);
+                if (entries.length === 0 && term) {
+                  return <p className={styles.muted}>No se encontraron asignaciones para "{searchTerm}"</p>;
+                }
+
+                return (
+                  <div className={styles.grid}>
+                    {entries.map(([label, items]) => {
+                      const isExpanded = expandedGroups.has(label);
+                      const groupProgress = progressData.filter((p) =>
+                        items.some((a) => a.id === Number(p.assignment_id))
+                      );
+                      const groupTotal = groupProgress.reduce((s, p) => s + (Number(p.total_rows) || 0), 0);
+                      const groupDone = groupProgress.reduce((s, p) => s + (Number(p.uploaded) || 0) + (Number(p.no_evidence) || 0), 0);
+                      const groupPct = groupTotal > 0 ? Math.round((groupDone / groupTotal) * 100) : 0;
+
+                      const toggleGroup = () => {
+                        setExpandedGroups((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(label)) next.delete(label);
+                          else next.add(label);
+                          return next;
+                        });
+                      };
+
+                      return (
+                        <div key={label} className={styles.groupCard}>
+                          <div className={styles.groupHeader} onClick={toggleGroup}>
+                            <span className={styles.groupChevron}>{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                            <div className={styles.groupHeaderContent}>
+                              <h3 className={styles.groupLabel}>{label}</h3>
+                              <div className={styles.groupSubline}>
+                                <span className={styles.groupAnalystCount}>
+                                  {items.length} analista{items.length !== 1 ? 's' : ''}
+                                </span>
+                                <span className={styles.groupDate}>
+                                  {new Date(items[0].created_at).toLocaleDateString()}
+                                </span>
+                                {groupTotal > 0 && (
+                                  <span className={`${styles.groupPctBadge} ${groupPct === 100 ? styles.groupPctComplete : ''}`}>
+                                    {groupPct}%
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {groupTotal > 0 && (
+                              <div className={styles.groupMiniBar}>
+                                <div className={styles.groupMiniBarFill} style={{ width: `${groupPct}%` }} />
+                              </div>
+                            )}
+                          </div>
+
+                          {isExpanded && (
+                            <div className={styles.groupBody}>
+                              {items.map((a) => {
+                                const ap = progressData.find((p) => Number(p.assignment_id) === a.id);
+                                const aTotal = Number(ap?.total_rows) || 0;
+                                const aDone = (Number(ap?.uploaded) || 0) + (Number(ap?.no_evidence) || 0);
+                                const aPct = aTotal > 0 ? Math.round((aDone / aTotal) * 100) : 0;
+
+                                return (
+                                  <div
+                                    key={a.id}
+                                    className={`${styles.analystRow} ${a.completed_at ? styles.analystRowCompleted : ''}`}
+                                    onClick={() => setSelected(a)}
+                                  >
+                                    <div className={styles.analystInfo}>
+                                      <span className={styles.analystName}>{a.user_name || 'Sin nombre'}</span>
+                                      {a.range_from && a.range_to && (
+                                        <span className={styles.analystRange}>
+                                          Filas {a.range_from} – {a.range_to}
+                                        </span>
+                                      )}
+                                      {a.completed_at && (
+                                        <span className={styles.completedBadge}>Completada</span>
+                                      )}
+                                    </div>
+                                    <div className={styles.analystRight}>
+                                      {aTotal > 0 && (
+                                        <div className={styles.analystProgressWrap}>
+                                          <div className={styles.analystProgressBar}>
+                                            <div className={styles.analystProgressFill} style={{ width: `${aPct}%` }} />
+                                          </div>
+                                          <span className={styles.analystPct}>{aPct}%</span>
+                                          <span className={styles.analystCount}>{aDone}/{aTotal}</span>
+                                        </div>
+                                      )}
+                                      <button
+                                        className={styles.deleteBtn}
+                                        onClick={(e) => handleDelete(e, a.id)}
+                                      >
+                                        Eliminar
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
             ) : (
+              // Analyst: simple card list
               <div className={styles.list}>
                 {filteredAssignments.map((a) => (
                   <div
@@ -781,9 +1019,6 @@ export default function MyAssignments() {
                       {a.range_from && a.range_to && (
                         <span className={styles.range}> (filas {a.range_from} - {a.range_to})</span>
                       )}
-                      {isAdmin && a.user_name && (
-                        <span className={styles.userName}> — {a.user_name}</span>
-                      )}
                       {a.completed_at && (
                         <span className={styles.completedBadge}>
                           Completada {new Date(a.completed_at).toLocaleDateString()}
@@ -794,22 +1029,12 @@ export default function MyAssignments() {
                       <span className={styles.date}>
                         {new Date(a.created_at).toLocaleString()}
                       </span>
-                      {!isAdmin && (
-                        <button
-                          className={a.completed_at ? styles.reactivateBtn : styles.completeBtn}
-                          onClick={(e) => handleToggleComplete(e, a.id)}
-                        >
-                          {a.completed_at ? 'Reactivar' : 'Completar'}
-                        </button>
-                      )}
-                      {isAdmin && (
-                        <button
-                          className={styles.deleteBtn}
-                          onClick={(e) => handleDelete(e, a.id)}
-                        >
-                          Eliminar
-                        </button>
-                      )}
+                      <button
+                        className={a.completed_at ? styles.reactivateBtn : styles.completeBtn}
+                        onClick={(e) => handleToggleComplete(e, a.id)}
+                      >
+                        {a.completed_at ? 'Reactivar' : 'Completar'}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -884,29 +1109,33 @@ export default function MyAssignments() {
               </div>
             </div>
 
-            {/* Admin: show assigned ranges summary */}
+            {/* Admin: show assigned ranges summary — collapsible */}
             {isAdmin && assignedRanges.length > 0 && (
               <div className={styles.rangesSection}>
-                <h4 className={styles.rangesTitle}>Rangos asignados</h4>
-                <div className={styles.rangesList}>
-                  {assignedRanges.map((r) => (
-                    <div key={r.id} className={styles.rangeTag}>
-                      <span className={styles.rangeUser}>{r.user}</span>
-                      <span className={styles.rangeValues}>Filas {r.from} - {r.to}</span>
-                      <button
-                        className={styles.rangDeleteBtn}
-                        onClick={() => handleDeleteSibling(r.id)}
-                      >
-                        &times;
-                      </button>
-                    </div>
-                  ))}
+                <div className={styles.rangesHeader} onClick={() => setShowRanges((v) => !v)}>
+                  <span className={styles.progressChevron}>{showRanges ? '\u25BC' : '\u25B6'}</span>
+                  <h4 className={styles.rangesTitle}>Rangos asignados</h4>
+                  <span className={styles.rangesSummary}>
+                    {assignedRanges.length} analista{assignedRanges.length !== 1 ? 's' : ''} — {assignedRanges.reduce((sum, r) => sum + (r.to - r.from + 1), 0)}/{total} filas asignadas
+                  </span>
                 </div>
-                {total > 0 && (
-                  <p className={styles.rangesSummary}>
-                    Total filas: {total} — Asignadas: {assignedRanges.reduce((sum, r) => sum + (r.to - r.from + 1), 0)}
-                    {' '} — Pendientes: {Math.max(0, total - assignedRanges.reduce((sum, r) => sum + (r.to - r.from + 1), 0))}
-                  </p>
+                {showRanges && (
+                  <>
+                    <div className={styles.rangesList}>
+                      {assignedRanges.map((r) => (
+                        <div key={r.id} className={styles.rangeTag}>
+                          <span className={styles.rangeUser}>{r.user}</span>
+                          <span className={styles.rangeValues}>Filas {r.from} - {r.to}</span>
+                          <button
+                            className={styles.rangDeleteBtn}
+                            onClick={() => handleDeleteSibling(r.id)}
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}

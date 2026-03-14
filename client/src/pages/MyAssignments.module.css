@@ -130,26 +130,42 @@
   border-color: var(--danger, #e74c3c);
 }
 
-/* Assigned ranges summary */
+/* Assigned ranges summary — collapsible */
 .rangesSection {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 0.75rem 1rem;
   margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.rangesHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+
+.rangesHeader:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
 }
 
 .rangesTitle {
   font-size: 0.85rem;
-  margin-bottom: 0.5rem;
+  margin: 0;
   color: var(--text);
+  font-weight: 700;
 }
 
 .rangesList {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  padding: 0.5rem 1rem 0.75rem;
+  border-top: 1px solid var(--border);
 }
 
 .rangeTag {
@@ -187,8 +203,10 @@
 }
 
 .rangesSummary {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* Admin assign-more section */
@@ -352,65 +370,114 @@
   border-color: var(--accent);
 }
 
-/* Admin progress panel */
+/* Admin progress panel — collapsible + grid */
 .progressPanel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-}
-
-.progressPanelTitle {
-  font-size: 0.9rem;
-  margin-bottom: 0.75rem;
-}
-
-.progressTable {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.progressRow {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.progressName {
-  font-size: 0.82rem;
-  font-weight: 600;
-  min-width: 140px;
-}
-
-.progressBarSmall {
-  flex: 1;
-  height: 6px;
-  background: var(--border);
-  border-radius: 3px;
   overflow: hidden;
 }
 
-.progressFillSmall {
+.progressPanelHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+
+.progressPanelHeader:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
+}
+
+.progressChevron {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.progressPanelTitle {
+  font-size: 0.85rem;
+  margin: 0;
+  font-weight: 700;
+}
+
+.progressPanelSummary {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.progressGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.progressCell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.progressCellTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
+.progressCellName {
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progressCellPct {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.progressCellDone {
+  color: var(--success, #27ae60);
+}
+
+.progressCellBar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressCellFill {
   height: 100%;
   background: var(--accent);
-  border-radius: 3px;
+  border-radius: 2px;
   transition: width 0.3s ease;
 }
 
-.progressRowPct {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--accent);
-  min-width: 35px;
-  text-align: right;
+.progressCellFillDone {
+  background: var(--success, #27ae60);
 }
 
-.progressRowDetail {
-  font-size: 0.75rem;
+.progressCellDetail {
+  font-size: 0.65rem;
   color: var(--text-muted);
-  min-width: 50px;
 }
 
 /* List filters toolbar */
@@ -569,4 +636,305 @@
 .reactivateBtn:hover {
   background: var(--accent);
   color: #fff;
+}
+
+/* ---- Admin: toolbar + search ---- */
+.adminToolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.adminToolbarRow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.quickDateGroup {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.quickDateBtn {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: none;
+  border-right: 1px solid var(--border);
+  font-size: 0.73rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.quickDateBtn:last-child {
+  border-right: none;
+}
+
+.quickDateBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.quickDateBtnActive {
+  background: var(--accent);
+  color: #fff;
+}
+
+.quickDateBtnActive:hover {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.searchInput {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.searchInput:focus {
+  border-color: var(--accent);
+}
+
+.searchInput::placeholder {
+  color: var(--text-muted);
+}
+
+.collapseAllBtn,
+.expandAllBtn {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.collapseAllBtn:hover,
+.expandAllBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- Admin: grid layout ---- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 0.75rem;
+}
+
+/* ---- Admin: grouped assignment cards ---- */
+.groupCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: box-shadow 0.15s;
+}
+
+.groupCard:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+
+.groupHeader:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
+}
+
+.groupChevron {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 12px;
+  transition: transform 0.15s;
+}
+
+.groupHeaderContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.groupLabel {
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.3;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.groupSubline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.groupDate {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.groupAnalystCount {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(44, 62, 107, 0.08);
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+}
+
+.groupPctBadge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(44, 62, 107, 0.06);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.groupPctComplete {
+  color: var(--success, #27ae60);
+  background: rgba(46, 204, 113, 0.1);
+}
+
+.groupMiniBar {
+  width: 50px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.groupMiniBarFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.groupBody {
+  border-top: 1px solid var(--border);
+}
+
+.analystRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-bottom: 1px solid var(--border);
+  gap: 0.5rem;
+}
+
+.analystRow:last-child {
+  border-bottom: none;
+}
+
+.analystRow:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
+}
+
+.analystRowCompleted {
+  opacity: 0.55;
+}
+
+.analystInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.analystName {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.analystRange {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.analystRight {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.analystProgressWrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.analystProgressBar {
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.analystProgressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.analystPct {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 26px;
+  text-align: right;
+}
+
+.analystCount {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  min-width: 35px;
 }
