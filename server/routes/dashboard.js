@@ -105,37 +105,37 @@ router.get('/dashboard/filter-options', async (req, res) => {
       await Promise.all([
         pool.query(
           `SELECT DISTINCT row_data->>'nomCorporacion' AS v FROM csv_rows
-           WHERE completed = FALSE ${corpWhere.text} ORDER BY v`,
+           WHERE TRUE ${corpWhere.text} ORDER BY v`,
           corpWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomDepartamento' AS v FROM csv_rows
-           WHERE completed = FALSE ${deptWhere.text} ORDER BY v`,
+           WHERE TRUE ${deptWhere.text} ORDER BY v`,
           deptWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomMunicipio' AS v FROM csv_rows
-           WHERE completed = FALSE ${muniWhere.text} ORDER BY v`,
+           WHERE TRUE ${muniWhere.text} ORDER BY v`,
           muniWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'zona' AS v FROM csv_rows
-           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
+           WHERE TRUE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'codPuesto' AS v FROM csv_rows
-           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
+           WHERE TRUE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'mesa' AS v FROM csv_rows
-           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
+           WHERE TRUE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
         pool.query(
           `SELECT DISTINCT row_data->>'nomLista' AS v FROM csv_rows
-           WHERE completed = FALSE ${restWhere.text} ORDER BY v`,
+           WHERE TRUE ${restWhere.text} ORDER BY v`,
           restWhere.values
         ),
       ]);
@@ -164,18 +164,21 @@ router.get('/dashboard/rows', async (req, res) => {
 
     const where = buildWhere(req.query);
     const p = where.nextParam;
+    const evExclude = req.query.excludeWithEvidence === '1'
+      ? ` AND NOT EXISTS (SELECT 1 FROM evidences e JOIN csv_rows c2 ON e.csv_row_id = c2.id WHERE e.status = 'uploaded' AND e.csv_row_id IS NOT NULL AND c2.row_data->>'nomCorporacion' IS NOT DISTINCT FROM csv_rows.row_data->>'nomCorporacion' AND c2.row_data->>'nomDepartamento' IS NOT DISTINCT FROM csv_rows.row_data->>'nomDepartamento' AND c2.row_data->>'nomMunicipio' IS NOT DISTINCT FROM csv_rows.row_data->>'nomMunicipio' AND c2.row_data->>'zona' IS NOT DISTINCT FROM csv_rows.row_data->>'zona' AND c2.row_data->>'codPuesto' IS NOT DISTINCT FROM csv_rows.row_data->>'codPuesto' AND c2.row_data->>'mesa' IS NOT DISTINCT FROM csv_rows.row_data->>'mesa' AND c2.row_data->>'candidato' IS NOT DISTINCT FROM csv_rows.row_data->>'candidato')`
+      : '';
 
     const [rowsResult, countResult] = await Promise.all([
       pool.query(
         `SELECT row_data FROM csv_rows
-         WHERE completed = FALSE ${where.text}
+         WHERE completed = FALSE${evExclude} ${where.text}
          ORDER BY row_index
          LIMIT $${p} OFFSET $${p + 1}`,
         [...where.values, limit, offset]
       ),
       pool.query(
         `SELECT COUNT(*) AS total FROM csv_rows
-         WHERE completed = FALSE ${where.text}`,
+         WHERE completed = FALSE${evExclude} ${where.text}`,
         where.values
       ),
     ]);
@@ -337,7 +340,7 @@ router.post('/dashboard/multi-rows/csv', async (req, res) => {
 // Supports optional rangeFrom/rangeTo to slice a specific row range
 router.post('/dashboard/multi-rows', async (req, res) => {
   try {
-    const { blocks, page: rawPage, limit: rawLimit, rangeFrom, rangeTo } = req.body;
+    const { blocks, page: rawPage, limit: rawLimit, rangeFrom, rangeTo, assignmentId, excludeWithEvidence } = req.body;
     if (!blocks || !Array.isArray(blocks) || blocks.length === 0) {
       return res.json({ rows: [], pagination: { page: 1, limit: 100, total: 0, totalPages: 0 } });
     }
@@ -349,6 +352,21 @@ router.post('/dashboard/multi-rows', async (req, res) => {
     const unionParts = [];
     const allValues = [];
     let p = 1;
+
+    // If assignmentId provided, also include completed rows that have evidence for this assignment
+    // This allows analysts to still see and edit rows they already submitted evidence for
+    let completedClause = 'completed = FALSE';
+    if (assignmentId) {
+      completedClause = `(completed = FALSE OR id IN (SELECT csv_row_id FROM evidences WHERE assignment_id = $${p} AND csv_row_id IS NOT NULL))`;
+      allValues.push(Number(assignmentId));
+      p++;
+    }
+
+    // When assigning, exclude rows that already have uploaded evidence from any assignment
+    let evidenceExclude = '';
+    if (excludeWithEvidence) {
+      evidenceExclude = ` AND NOT EXISTS (SELECT 1 FROM evidences e JOIN csv_rows c2 ON e.csv_row_id = c2.id WHERE e.status = 'uploaded' AND e.csv_row_id IS NOT NULL AND c2.row_data->>'nomCorporacion' IS NOT DISTINCT FROM csv_rows.row_data->>'nomCorporacion' AND c2.row_data->>'nomDepartamento' IS NOT DISTINCT FROM csv_rows.row_data->>'nomDepartamento' AND c2.row_data->>'nomMunicipio' IS NOT DISTINCT FROM csv_rows.row_data->>'nomMunicipio' AND c2.row_data->>'zona' IS NOT DISTINCT FROM csv_rows.row_data->>'zona' AND c2.row_data->>'codPuesto' IS NOT DISTINCT FROM csv_rows.row_data->>'codPuesto' AND c2.row_data->>'mesa' IS NOT DISTINCT FROM csv_rows.row_data->>'mesa' AND c2.row_data->>'candidato' IS NOT DISTINCT FROM csv_rows.row_data->>'candidato')`;
+    }
 
     for (const block of blocks) {
       const conditions = [];
@@ -389,7 +407,7 @@ router.post('/dashboard/multi-rows', async (req, res) => {
       }
 
       const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+      unionParts.push(`SELECT id AS csv_row_id, row_data, row_index FROM csv_rows WHERE ${completedClause}${evidenceExclude} AND ${where}`);
     }
 
     const combined = unionParts.join(' UNION ');
@@ -424,7 +442,7 @@ router.post('/dashboard/multi-rows', async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
-      rows: rowsResult.rows.map((r) => ({ ...r.row_data, _rn: Number(r.rn) })),
+      rows: rowsResult.rows.map((r) => ({ ...r.row_data, _rn: Number(r.rn), _csvRowId: Number(r.csv_row_id) })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {

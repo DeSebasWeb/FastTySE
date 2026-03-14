@@ -70,7 +70,7 @@ export default function MyAssignments() {
     const blocks = Array.isArray(selected.filters) ? selected.filters : [selected.filters];
 
     Promise.all([
-      getMultiRows(blocks, page, 100, rangeOpts),
+      getMultiRows(blocks, page, 100, { ...rangeOpts, assignmentId: selected.id }),
       page === 1 ? getEvidences(selected.id, { siblings: isAdmin }) : Promise.resolve(null),
     ])
       .then(([data, evMap]) => {
@@ -207,6 +207,7 @@ export default function MyAssignments() {
       observations,
       imageDataE24,
       rotationE24,
+      csvRowId: modalRow.row?._csvRowId || null,
     });
     setEvidences((prev) => ({ ...prev, [modalRow.rowIndex]: result }));
   }
@@ -447,13 +448,13 @@ export default function MyAssignments() {
     const pageStart = (page - 1) * 100 + 1;
     for (let i = 0; i < rows.length; i++) {
       const gi = rows[i]._rn ?? (pageStart + i);
-      if (!evidences[gi]) pending.push(gi);
+      if (!evidences[gi]) pending.push({ rowIndex: gi, csvRowId: rows[i]._csvRowId || null });
     }
     if (pending.length === 0) { alert('No hay filas pendientes en esta página'); return; }
     if (!confirm(`¿Marcar ${pending.length} filas como "Sin evidencia"?`)) return;
-    for (const rowIndex of pending) {
+    for (const { rowIndex, csvRowId } of pending) {
       try {
-        const result = await saveEvidence({ assignmentId: selected.id, rowIndex, status: 'no_evidence', imageData: null, rotation: 0, observations: null });
+        const result = await saveEvidence({ assignmentId: selected.id, rowIndex, status: 'no_evidence', imageData: null, rotation: 0, observations: null, csvRowId });
         setEvidences((prev) => ({ ...prev, [rowIndex]: result }));
       } catch (err) { console.error('Bulk no_evidence error:', err); }
     }

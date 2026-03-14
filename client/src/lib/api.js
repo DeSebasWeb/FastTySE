@@ -73,17 +73,19 @@ export async function getFilterOptions(filters = {}) {
   return res.data;
 }
 
-export async function getDashboardRows(filters = {}, page = 1, limit = 100) {
-  const res = await api.get('/dashboard/rows', {
-    params: { ...cleanFilters(filters), page, limit },
-  });
+export async function getDashboardRows(filters = {}, page = 1, { excludeWithEvidence } = {}) {
+  const params = { ...cleanFilters(filters), page, limit: 100 };
+  if (excludeWithEvidence) params.excludeWithEvidence = '1';
+  const res = await api.get('/dashboard/rows', { params });
   return res.data;
 }
 
-export async function getMultiRows(blocks, page = 1, limit = 100, { rangeFrom, rangeTo } = {}) {
+export async function getMultiRows(blocks, page = 1, limit = 100, { rangeFrom, rangeTo, assignmentId, excludeWithEvidence } = {}) {
   const body = { blocks, page, limit };
   if (rangeFrom) body.rangeFrom = rangeFrom;
   if (rangeTo) body.rangeTo = rangeTo;
+  if (assignmentId) body.assignmentId = assignmentId;
+  if (excludeWithEvidence) body.excludeWithEvidence = true;
   const res = await api.post('/dashboard/multi-rows', body);
   return res.data;
 }
@@ -139,8 +141,8 @@ export async function getAssignmentsProgress() {
 
 // --- Evidences API ---
 
-export async function saveEvidence({ assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 }) {
-  const res = await api.post('/evidences', { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 });
+export async function saveEvidence({ assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24, csvRowId }) {
+  const res = await api.post('/evidences', { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24, csvRowId });
   return res.data;
 }
 

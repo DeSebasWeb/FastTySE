@@ -7,19 +7,19 @@ const router = Router();
 // POST /api/evidences — save or update evidence for a row
 router.post('/evidences', authMiddleware, async (req, res) => {
   try {
-    const { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24 } = req.body;
+    const { assignmentId, rowIndex, status, imageData, rotation, observations, imageDataE24, rotationE24, csvRowId } = req.body;
 
     if (!assignmentId || rowIndex == null || !status) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const result = await pool.query(
-      `INSERT INTO evidences (assignment_id, row_index, status, image_data, rotation, observations, image_data_e24, rotation_e24, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      `INSERT INTO evidences (assignment_id, row_index, status, image_data, rotation, observations, image_data_e24, rotation_e24, csv_row_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        ON CONFLICT (assignment_id, row_index)
-       DO UPDATE SET status = $3, image_data = $4, rotation = $5, observations = $6, image_data_e24 = $7, rotation_e24 = $8, updated_at = NOW()
+       DO UPDATE SET status = $3, image_data = $4, rotation = $5, observations = $6, image_data_e24 = $7, rotation_e24 = $8, csv_row_id = COALESCE($9, evidences.csv_row_id), updated_at = NOW()
        RETURNING *`,
-      [assignmentId, rowIndex, status, imageData || null, rotation || 0, observations || null, imageDataE24 || null, rotationE24 || 0]
+      [assignmentId, rowIndex, status, imageData || null, rotation || 0, observations || null, imageDataE24 || null, rotationE24 || 0, csvRowId || null]
     );
 
     res.json(result.rows[0]);
@@ -161,13 +161,21 @@ router.patch('/evidences/batch-rotate', authMiddleware, async (req, res) => {
 // DELETE /api/evidences/:id — delete a single evidence
 router.delete('/evidences/:id', authMiddleware, async (req, res) => {
   try {
+    // Check ownership: analysts can only delete their own evidences
+    const check = await pool.query(
+      `SELECT e.id, e.csv_row_id, a.user_id FROM evidences e JOIN assignments a ON e.assignment_id = a.id WHERE e.id = $1`,
+      [req.params.id]
+    );
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Evidence not found' });
+    if (req.user.rol !== 'Administrador' && check.rows[0].user_id !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar esta evidencia' });
+    }
+
     const result = await pool.query(
       `DELETE FROM evidences WHERE id = $1 RETURNING assignment_id, row_index`,
       [req.params.id]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Evidence not found' });
-    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Delete evidence error:', err);

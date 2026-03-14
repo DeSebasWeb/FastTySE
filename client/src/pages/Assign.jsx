@@ -70,6 +70,7 @@ export default function Assign() {
   const [selectedUsers, setSelectedUsers] = useState(new Set());
   const [userRanges, setUserRanges] = useState({});
   const [assigning, setAssigning] = useState(false);
+  const [hideCompleted, setHideCompleted] = useState(false);
   const [doneAssignments, setDoneAssignments] = useState([]);
 
   const queueKey = queue.map((q) => q.id).join(',');
@@ -113,7 +114,7 @@ export default function Assign() {
 
     if (queue.length > 0) {
       const blocks = queue.map((q) => q.filters);
-      getMultiRows(blocks, page)
+      getMultiRows(blocks, page, 100, { excludeWithEvidence: hideCompleted })
         .then((data) => {
           setRows(data.rows);
           setTotalPages(data.pagination.totalPages);
@@ -122,7 +123,7 @@ export default function Assign() {
         .catch(console.error)
         .finally(() => setLoadingRows(false));
     } else {
-      getDashboardRows(apiFilters(), page)
+      getDashboardRows(apiFilters(), page, { excludeWithEvidence: hideCompleted })
         .then((data) => {
           let filtered = data.rows;
           if (filters.diferencia === 'ganando') {
@@ -139,7 +140,7 @@ export default function Assign() {
     }
   }, [queueKey, filters.nomCorporacion, filters.nomDepartamento, filters.nomMunicipio,
       filters.zona, filters.codPuesto, filters.mesa, filters.nomLista,
-      filters.nomCandidato, filters.diferencia, page]);
+      filters.nomCandidato, filters.diferencia, page, hideCompleted]);
 
   useEffect(() => {
     getAnalysts().then(setAnalysts).catch(console.error);
@@ -268,6 +269,12 @@ export default function Assign() {
                 disabled={!hasActiveFilter}
               >
                 + Agregar filtro
+              </button>
+              <button
+                className={hideCompleted ? styles.hideCompletedActive : styles.hideCompletedBtn}
+                onClick={() => { setHideCompleted((v) => !v); setPage(1); }}
+              >
+                {hideCompleted ? 'Mostrando solo pendientes' : 'Omitir realizadas'}
               </button>
             </>
           }

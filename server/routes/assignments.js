@@ -197,57 +197,24 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'No hay evidencias subidas para esta asignación' });
     }
 
-    // Rebuild the same UNION query used by /dashboard/multi-rows
-    // so that rn values match exactly what was saved in evidences.row_index
-    const filters = Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters];
-    const unionParts = [];
-    const allValues = [];
-    let p = 1;
+    // Get row_data directly from csv_rows using csv_row_id (stable key)
+    // For evidences without csv_row_id, fall back to UNION query
+    const csvRowIds = evResult.rows.filter((e) => e.csv_row_id).map((e) => e.csv_row_id);
+    const csvRowsResult = csvRowIds.length > 0
+      ? await pool.query(`SELECT id, row_data, fecha_csv FROM csv_rows WHERE id = ANY($1)`, [csvRowIds])
+      : { rows: [] };
 
-    for (const block of filters) {
-      const conditions = [];
-      const exact = [
-        ['nomCorporacion', 'nomCorporacion'],
-        ['nomDepartamento', 'nomDepartamento'],
-        ['nomMunicipio', 'nomMunicipio'],
-        ['zona', 'zona'],
-        ['codPuesto', 'codPuesto'],
-        ['mesa', 'mesa'],
-      ];
-      for (const [param, field] of exact) {
-        if (block[param]) {
-          conditions.push(`row_data->>'${field}' = $${p}`);
-          allValues.push(block[param]);
-          p++;
-        }
-      }
-      if (block.nomLista) {
-        conditions.push(`row_data->>'nomLista' ILIKE $${p}`);
-        allValues.push(`%${block.nomLista}%`);
-        p++;
-      }
-      if (block.nomCandidato) {
-        conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`);
-        allValues.push(`%${block.nomCandidato}%`);
-        p++;
-      }
-      if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
-      else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
-
-      const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      // Must match multi-rows filter (completed = FALSE) so ROW_NUMBER matches evidence.row_index
-      unionParts.push(`SELECT row_data, row_index, fecha_csv FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    const csvRowMap = {};
+    for (const r of csvRowsResult.rows) {
+      csvRowMap[r.id] = { data: r.row_data, fecha: r.fecha_csv ? r.fecha_csv.toISOString().slice(0, 10) : null };
     }
 
-    // Same numbering as multi-rows: ROW_NUMBER over the full UNION ordered by row_index
-    const combined = unionParts.join(' UNION ');
-    const numbered = `SELECT *, ROW_NUMBER() OVER (ORDER BY row_index) AS rn FROM (${combined}) AS combined`;
-    const rowsResult = await pool.query(`SELECT * FROM (${numbered}) AS numbered ORDER BY rn`, allValues);
-
-    // Build a map rn -> { row_data, fecha_csv }  (rn matches evidence.row_index)
+    // Build a map rn -> { row_data, fecha_csv } using csv_row_id
     const rowMap = {};
-    for (const r of rowsResult.rows) {
-      rowMap[Number(r.rn)] = { data: r.row_data, fecha: r.fecha_csv ? r.fecha_csv.toISOString().slice(0, 10) : null };
+    for (const ev of evResult.rows) {
+      if (ev.csv_row_id && csvRowMap[ev.csv_row_id]) {
+        rowMap[ev.row_index] = csvRowMap[ev.csv_row_id];
+      }
     }
 
     // Apply range if set — only for analysts, admin sees all
@@ -563,35 +530,15 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
     if (evResult.rows.length === 0) return res.status(404).json({ error: 'No hay evidencia para esta fila' });
     const ev = evResult.rows[0];
 
-    // Rebuild row data using same UNION query
-    const filters = Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters];
-    const unionParts = [];
-    const allValues = [];
-    let p = 1;
-    for (const block of filters) {
-      const conditions = [];
-      const exact = [
-        ['nomCorporacion','nomCorporacion'],['nomDepartamento','nomDepartamento'],
-        ['nomMunicipio','nomMunicipio'],['zona','zona'],['codPuesto','codPuesto'],['mesa','mesa'],
-      ];
-      for (const [param, field] of exact) {
-        if (block[param]) { conditions.push(`row_data->>'${field}' = $${p}`); allValues.push(block[param]); p++; }
-      }
-      if (block.nomLista) { conditions.push(`row_data->>'nomLista' ILIKE $${p}`); allValues.push(`%${block.nomLista}%`); p++; }
-      if (block.nomCandidato) { conditions.push(`(row_data->>'candidato' ILIKE $${p} OR row_data->>'codCandidato' ILIKE $${p})`); allValues.push(`%${block.nomCandidato}%`); p++; }
-      if (block.diferencia === 'ganando') conditions.push(`(row_data->>'Diferencia')::numeric > 0`);
-      else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
-      const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    // Get row_data directly from csv_rows using csv_row_id (stable key)
+    let row;
+    if (ev.csv_row_id) {
+      const csvRow = await pool.query(`SELECT row_data FROM csv_rows WHERE id = $1`, [ev.csv_row_id]);
+      if (csvRow.rows.length === 0) return res.status(404).json({ error: 'Fila no encontrada' });
+      row = csvRow.rows[0].row_data;
+    } else {
+      return res.status(404).json({ error: 'Evidencia sin referencia a fila CSV' });
     }
-    const combined = unionParts.join(' UNION ');
-    const numbered = `SELECT *, ROW_NUMBER() OVER (ORDER BY row_index) AS rn FROM (${combined}) AS combined`;
-    const rowsResult = await pool.query(
-      `SELECT * FROM (${numbered}) AS numbered WHERE rn = $${p}`,
-      [...allValues, rn]
-    );
-    if (rowsResult.rows.length === 0) return res.status(404).json({ error: 'Fila no encontrada' });
-    const row = rowsResult.rows[0].row_data;
 
     const now = new Date();
     const tzOpts = { timeZone: 'America/Bogota' };
@@ -808,7 +755,7 @@ async function getAssignmentRows(assignmentId, { applyRange = true } = {}) {
     else if (block.diferencia === 'perdiendo') conditions.push(`(row_data->>'Diferencia')::numeric < 0`);
 
     const where = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-    unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE completed = FALSE AND ${where}`);
+    unionParts.push(`SELECT row_data, row_index FROM csv_rows WHERE ${where}`);
   }
 
   const combined = unionParts.join(' UNION ');

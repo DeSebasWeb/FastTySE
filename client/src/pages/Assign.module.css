@@ -140,6 +140,35 @@
   cursor: not-allowed;
 }
 
+.hideCompletedBtn {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hideCompletedBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hideCompletedActive {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--success);
+  background: var(--success);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .queueSection {
   margin: 1rem 0;
   background: var(--surface);
