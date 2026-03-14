@@ -3,6 +3,7 @@ import pool from '../db/pool.js';
 import { authMiddleware, requireRole } from '../middleware/auth.js';
 import puppeteer from 'puppeteer';
 import ExcelJS from 'exceljs';
+import { PDFDocument } from 'pdf-lib';
 
 const router = Router();
 
@@ -71,6 +72,30 @@ router.get('/assignments', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('List assignments error:', err);
     res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// PATCH /api/assignments/:id/complete — Toggle completed_at
+router.patch('/assignments/:id/complete', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Verify ownership (analyst) or admin
+    const check = await pool.query(`SELECT * FROM assignments WHERE id = $1`, [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const assignment = check.rows[0];
+    if (req.user.rol !== 'Administrador' && assignment.user_id !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    // Toggle: if completed_at is set, clear it; otherwise set it
+    const newValue = assignment.completed_at ? null : new Date();
+    const result = await pool.query(
+      `UPDATE assignments SET completed_at = $1 WHERE id = $2 RETURNING *`,
+      [newValue, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Toggle complete error:', err);
+    res.status(500).json({ error: 'Failed to toggle completion' });
   }
 });
 
@@ -150,11 +175,24 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
     const fechaFilter = req.query.fecha || null;
     const noReclamar = req.query.noReclamar === '1';
 
-    // Get evidences with status = 'uploaded' for this assignment
-    const evResult = await pool.query(
-      `SELECT * FROM evidences WHERE assignment_id = $1 AND status = 'uploaded' ORDER BY row_index`,
-      [req.params.id]
-    );
+    // Get evidences — admin gets all siblings' evidences, analyst gets only own
+    let evResult;
+    if (req.user.rol === 'Administrador') {
+      const siblingIds = await pool.query(
+        `SELECT id FROM assignments WHERE filters = $1::jsonb`,
+        [JSON.stringify(Array.isArray(assignment.filters) ? assignment.filters : [assignment.filters])]
+      );
+      const ids = siblingIds.rows.map((r) => r.id);
+      evResult = await pool.query(
+        `SELECT DISTINCT ON (row_index) * FROM evidences WHERE assignment_id = ANY($1) AND status = 'uploaded' ORDER BY row_index, updated_at DESC`,
+        [ids]
+      );
+    } else {
+      evResult = await pool.query(
+        `SELECT * FROM evidences WHERE assignment_id = $1 AND status = 'uploaded' ORDER BY row_index`,
+        [req.params.id]
+      );
+    }
     if (evResult.rows.length === 0) {
       return res.status(404).json({ error: 'No hay evidencias subidas para esta asignación' });
     }
@@ -212,9 +250,10 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
       rowMap[Number(r.rn)] = { data: r.row_data, fecha: r.fecha_csv ? r.fecha_csv.toISOString().slice(0, 10) : null };
     }
 
-    // Apply range if set
-    const rangeFrom = assignment.range_from;
-    const rangeTo = assignment.range_to;
+    // Apply range if set — only for analysts, admin sees all
+    const applyRange = req.user.rol !== 'Administrador';
+    const rangeFrom = applyRange ? assignment.range_from : null;
+    const rangeTo = applyRange ? assignment.range_to : null;
 
     // Build HTML
     const now = new Date();
@@ -258,8 +297,7 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
         ? `<span style="color:${difColor};font-weight:700">0 (Cero)</span>`
         : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
 
-      const rotation = ev.rotation || 0;
-      const rotStyle = rotation ? `transform:rotate(${rotation}deg);` : '';
+      const rotation = [0, 90, 180, 270].includes(ev.rotation) ? ev.rotation : 0;
 
       pages.push(`
         <div class="page">
@@ -304,7 +342,9 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
           </div>
 
           <div class="image-section">
-            <img src="${ev.image_data}" style="${rotStyle}" alt="Formulario E-14"/>
+            <div class="img-rotate-wrapper rot-${rotation}">
+              <img src="${ev.image_data}" alt="Formulario E-14"/>
+            </div>
           </div>
 
           ${ev.observations ? `
@@ -328,12 +368,7 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'No hay evidencias dentro del rango asignado' });
     }
 
-    const html = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8"/>
-  <title>Informe de Reclamaciones</title>
-  <style>
+    const PAGE_CSS = `
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 12px; color: #222; background: #fff; }
@@ -360,41 +395,79 @@ router.get('/assignments/:id/report', authMiddleware, async (req, res) => {
       display: flex; align-items: center; justify-content: center;
       overflow: hidden;
     }
-    .image-section img {
+    .img-rotate-wrapper {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%;
+    }
+    .img-rotate-wrapper img {
       max-width: 100%; max-height: 100%;
       object-fit: contain;
       border: 1px solid #ddd; border-radius: 4px;
       display: block;
     }
+    .rot-90 { transform: rotate(90deg); }
+    .rot-90 img { max-width: 90vh; max-height: 60vw; }
+    .rot-180 { transform: rotate(180deg); }
+    .rot-270 { transform: rotate(270deg); }
+    .rot-270 img { max-width: 90vh; max-height: 60vw; }
     .obs-section { flex-shrink: 0; margin-top: 6px; }
     .obs-title { font-weight: 700; font-size: 11px; color: #555; margin-bottom: 3px; }
     .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 6px; }
     .obs-content { display: flex; align-items: flex-start; gap: 8px; background: #f5f5f5; padding: 6px 10px; border-radius: 4px; font-size: 10px; }
     .obs-bar { width: 3px; min-height: 20px; background: #2c3e6b; border-radius: 2px; flex-shrink: 0; }
-    .footer { flex-shrink: 0; margin-top: 6px; text-align: center; font-size: 9px; color: #888; border-top: 1px solid #eee; padding-top: 4px; }
-  </style>
-</head>
-<body>
-  ${pages.join('\n')}
-</body>
-</html>`;
+    .footer { flex-shrink: 0; margin-top: 6px; text-align: center; font-size: 9px; color: #888; border-top: 1px solid #eee; padding-top: 4px; }`;
 
+    // Generate PDF in parallel batches for speed
+    const BATCH_SIZE = 10;
+    const CONCURRENCY = 3; // number of parallel browser tabs
     let browser;
     try {
       browser = await puppeteer.launch({
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+               '--disable-gpu', '--disable-extensions'],
       });
-      const browserPage = await browser.newPage();
-      await browserPage.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      const pdfBuffer = await browserPage.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '0', right: '0', bottom: '0', left: '0' },
-      });
+
+      // Split pages into batches
+      const batches = [];
+      for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+        batches.push(pages.slice(i, i + BATCH_SIZE));
+      }
+
+      // Process a single batch into a PDF buffer
+      async function processBatch(batch) {
+        const batchHtml = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><style>${PAGE_CSS}</style></head><body>${batch.join('\n')}</body></html>`;
+        const browserPage = await browser.newPage();
+        await browserPage.setContent(batchHtml, { waitUntil: 'domcontentloaded', timeout: 120000 });
+        const pdfBytes = await browserPage.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: { top: '0', right: '0', bottom: '0', left: '0' },
+        });
+        await browserPage.close();
+        return pdfBytes;
+      }
+
+      // Process batches with limited concurrency
+      const pdfBuffers = new Array(batches.length);
+      for (let i = 0; i < batches.length; i += CONCURRENCY) {
+        const chunk = batches.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(chunk.map((b) => processBatch(b)));
+        results.forEach((buf, j) => { pdfBuffers[i + j] = buf; });
+      }
+
+      // Merge all PDF buffers in order
+      const mergedPdf = await PDFDocument.create();
+      for (const buf of pdfBuffers) {
+        const doc = await PDFDocument.load(buf);
+        const copiedPages = await mergedPdf.copyPages(doc, doc.getPageIndices());
+        for (const pg of copiedPages) mergedPdf.addPage(pg);
+      }
+
+      const finalPdf = await mergedPdf.save();
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="informe-${assignment.id}.pdf"`);
-      return res.send(Buffer.from(pdfBuffer));
+      return res.send(Buffer.from(finalPdf));
     } finally {
       if (browser) await browser.close();
     }
@@ -415,9 +488,19 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
     if (assignResult.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const assignment = assignResult.rows[0];
 
+    // Search across all sibling assignments (same filters) for the evidence
+    const siblingIds = await pool.query(
+      `SELECT id FROM assignments WHERE filters = $1::jsonb`,
+      [JSON.stringify(assignment.filters)]
+    );
+    const allIds = siblingIds.rows.map((r) => r.id);
+    if (!allIds.includes(Number(assignmentId))) allIds.push(Number(assignmentId));
+
     const evResult = await pool.query(
-      `SELECT * FROM evidences WHERE assignment_id = $1 AND row_index = $2 AND status = 'uploaded'`,
-      [assignmentId, rn]
+      `SELECT DISTINCT ON (row_index) * FROM evidences
+       WHERE assignment_id = ANY($1) AND row_index = $2 AND status = 'uploaded'
+       ORDER BY row_index, updated_at DESC`,
+      [allIds, rn]
     );
     if (evResult.rows.length === 0) return res.status(404).json({ error: 'No hay evidencia para esta fila' });
     const ev = evResult.rows[0];
@@ -467,8 +550,7 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
       : dif === 0 ? `<span style="color:${difColor};font-weight:700">0 (Cero)</span>`
       : `<span style="color:${difColor};font-weight:700">+${dif} (Exceso de votos)</span>`;
     const escapeHtml = (str) => String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const rotation = ev.rotation || 0;
-    const rotStyle = rotation ? `transform:rotate(${rotation}deg);` : '';
+    const rotation = [0, 90, 180, 270].includes(ev.rotation) ? ev.rotation : 0;
 
     const noReclamarBanner = noReclamar
       ? `<div style="background:#c0392b;color:#fff;text-align:center;padding:8px 0;font-size:20px;font-weight:900;letter-spacing:1px;border-radius:4px;margin-bottom:8px;">OJO — NO ES RECLAMACIÓN — PARA CUIDAR</div>`
@@ -500,12 +582,21 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
     display: flex; align-items: center; justify-content: center;
     overflow: hidden;
   }
-  .image-section img {
+  .img-rotate-wrapper {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 100%;
+  }
+  .img-rotate-wrapper img {
     max-width: 100%; max-height: 100%;
     object-fit: contain;
     border: 1px solid #ddd; border-radius: 4px;
     display: block;
   }
+  .rot-90 { transform: rotate(90deg); }
+  .rot-90 img { max-width: 90vh; max-height: 60vw; }
+  .rot-180 { transform: rotate(180deg); }
+  .rot-270 { transform: rotate(270deg); }
+  .rot-270 img { max-width: 90vh; max-height: 60vw; }
   .obs-section { flex-shrink: 0; margin-top: 6px; }
   .obs-title { font-weight: 700; font-size: 11px; color: #555; margin-bottom: 3px; }
   .obs-line { border: none; border-top: 1px solid #aaa; margin-bottom: 6px; }
@@ -533,7 +624,7 @@ router.get('/assignments/:assignmentId/report/:rowIndex', authMiddleware, async 
     <hr class="blue-line"/>
   </div>
   <div class="image-section">
-    <img src="${ev.image_data}" style="${rotStyle}" alt="Formulario E-14"/>
+    <div class="img-rotate-wrapper rot-${rotation}"><img src="${ev.image_data}" alt="Formulario E-14"/></div>
   </div>
   ${ev.observations ? `<div class="obs-section"><div class="obs-title">Observaciones</div><hr class="obs-line"/>
   <div class="obs-content"><div class="obs-bar"></div><span>${escapeHtml(ev.observations)}</span></div></div>` : ''}

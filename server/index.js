@@ -6,6 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(__dirname, '../.env') });
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import runner from 'node-pg-migrate';
@@ -49,7 +50,7 @@ async function start() {
       : process.env.NODE_ENV === 'production'
         ? false          // same-origin, no CORS headers needed
         : 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true,
   };
 
@@ -58,6 +59,7 @@ async function start() {
   app.set('io', io);
 
   app.use(cors(corsOptions));
+  app.use(compression());
   app.use(express.json({ limit: '10mb' }));
 
   // Health check

@@ -3,9 +3,9 @@ import NavBar from '../components/NavBar.jsx';
 import FilteredTable from '../components/FilteredTable.jsx';
 import EvidenceModal from '../components/EvidenceModal.jsx';
 import {
-  getAssignments, getMultiRows, getEvidences, saveEvidence, deleteEvidence,
+  getAssignments, getMultiRows, getEvidences, getEvidenceDetail, saveEvidence, deleteEvidence,
   deleteAssignment, getAssignmentSiblings, getAnalysts, createAssignments,
-  getAssignmentsProgress,
+  getAssignmentsProgress, toggleAssignmentComplete, batchLoadEvidenceDetails, batchRotateEvidences,
 } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import styles from './MyAssignments.module.css';
@@ -27,6 +27,7 @@ export default function MyAssignments() {
   // Evidence state
   const [evidences, setEvidences] = useState({});
   const [modalRow, setModalRow] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Admin: siblings + assign form
   const [siblings, setSiblings] = useState([]);
@@ -36,7 +37,14 @@ export default function MyAssignments() {
   const [assigning, setAssigning] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'done' | 'no_evidence'
+  const [selectedEvIds, setSelectedEvIds] = useState(new Set()); // row_index set for batch rotation
+  const [batchRotating, setBatchRotating] = useState(false);
   const [progressData, setProgressData] = useState([]);
+
+  // List view filters (analyst)
+  const [viewMode, setViewMode] = useState('active'); // 'active' | 'completed' | 'all'
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   useEffect(() => {
     getAssignments()
@@ -75,10 +83,31 @@ export default function MyAssignments() {
       .finally(() => setLoadingRows(false));
   }, [selected?.id, page]);
 
-  // Load evidences when assignment changes
+  // Load evidences when assignment changes, then prefetch image_data in background
   useEffect(() => {
     if (!selected) return;
-    getEvidences(selected.id, { siblings: isAdmin }).then(setEvidences).catch(console.error);
+    let cancelled = false;
+    getEvidences(selected.id, { siblings: isAdmin }).then(async (evMap) => {
+      if (cancelled) return;
+      setEvidences(evMap);
+      // Prefetch image_data in batches of 20 in background
+      const needFetch = Object.values(evMap).filter((e) => e.id && e.status === 'uploaded' && !e.image_data);
+      if (needFetch.length === 0) return;
+      const BATCH = 20;
+      for (let i = 0; i < needFetch.length; i += BATCH) {
+        if (cancelled) return;
+        const batch = needFetch.slice(i, i + BATCH);
+        const ids = batch.map((e) => e.id);
+        try {
+          const details = await batchLoadEvidenceDetails(ids);
+          if (cancelled) return;
+          setEvidences((prev) => ({ ...prev, ...details }));
+        } catch (err) {
+          console.error('Prefetch batch error:', err);
+        }
+      }
+    }).catch(console.error);
+    return () => { cancelled = true; };
   }, [selected?.id]);
 
   // Reset on assignment change
@@ -89,6 +118,7 @@ export default function MyAssignments() {
     setSiblings([]);
     setSelectedUsers(new Set());
     setUserRanges({});
+    setSelectedEvIds(new Set());
   }, [selected?.id]);
 
   // Admin: load siblings + analysts
@@ -105,6 +135,42 @@ export default function MyAssignments() {
     setEvidences({});
     setSiblings([]);
   }
+
+  // Toggle assignment completed status
+  async function handleToggleComplete(e, id) {
+    e.stopPropagation();
+    try {
+      const updated = await toggleAssignmentComplete(id);
+      setAssignments((prev) => prev.map((a) => (a.id === id ? { ...a, completed_at: updated.completed_at } : a)));
+    } catch (err) {
+      console.error('Toggle complete error:', err);
+    }
+  }
+
+  // Filter assignments for list view
+  const filteredAssignments = useMemo(() => {
+    let list = assignments;
+
+    // For non-admin: filter by active/completed
+    if (!isAdmin) {
+      if (viewMode === 'active') list = list.filter((a) => !a.completed_at);
+      else if (viewMode === 'completed') list = list.filter((a) => !!a.completed_at);
+    }
+
+    // Date filters
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      list = list.filter((a) => new Date(a.created_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((a) => new Date(a.created_at) <= to);
+    }
+
+    return list;
+  }, [assignments, viewMode, dateFrom, dateTo, isAdmin]);
 
   async function handleDelete(e, id) {
     e.stopPropagation();
@@ -151,6 +217,23 @@ export default function MyAssignments() {
       delete next[row_index];
       return next;
     });
+  }
+
+  // Open modal and lazy-load image_data if not already present
+  async function openModal(rowIndex, row) {
+    setModalRow({ rowIndex, row });
+    const ev = evidences[rowIndex];
+    if (ev && ev.id && !ev.image_data) {
+      setLoadingDetail(true);
+      try {
+        const detail = await getEvidenceDetail(ev.id);
+        setEvidences((prev) => ({ ...prev, [rowIndex]: detail }));
+      } catch (err) {
+        console.error('Load evidence detail error:', err);
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
   }
 
   // --- Admin: assign remaining rows ---
@@ -324,14 +407,13 @@ export default function MyAssignments() {
   // Navigate between rows in modal (respects active filter)
   const navigateModal = useCallback((direction) => {
     if (!modalRow || !selected || filteredRows.length === 0) return;
-    // Find current position in filteredRows by _globalIndex
     const curIdx = filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex);
     if (curIdx === -1) return;
     const nextIdx = curIdx + direction;
     if (nextIdx < 0 || nextIdx >= filteredRows.length) return;
     const nextRow = filteredRows[nextIdx];
-    setModalRow({ rowIndex: nextRow._globalIndex, row: nextRow });
-  }, [modalRow, selected, filteredRows]);
+    openModal(nextRow._globalIndex, nextRow);
+  }, [modalRow, selected, filteredRows, evidences]);
 
   // Keyboard shortcuts for modal navigation
   useEffect(() => {
@@ -375,6 +457,47 @@ export default function MyAssignments() {
     }
   }
 
+  // Batch rotate selected evidences
+  function toggleEvSelection(rowIndex) {
+    setSelectedEvIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowIndex)) next.delete(rowIndex);
+      else next.add(rowIndex);
+      return next;
+    });
+  }
+
+  function selectAllPageEvidences() {
+    const uploaded = filteredRows.filter((r) => evidences[r._globalIndex]?.status === 'uploaded');
+    setSelectedEvIds(new Set(uploaded.map((r) => r._globalIndex)));
+  }
+
+  async function handleBatchRotate(rotation) {
+    if (selectedEvIds.size === 0) return;
+    const ids = [];
+    for (const rowIndex of selectedEvIds) {
+      const ev = evidences[rowIndex];
+      if (ev?.id) ids.push(ev.id);
+    }
+    if (ids.length === 0) return;
+    setBatchRotating(true);
+    try {
+      const updated = await batchRotateEvidences(ids, rotation);
+      setEvidences((prev) => {
+        const next = { ...prev };
+        for (const u of updated) {
+          if (next[u.row_index]) next[u.row_index] = { ...next[u.row_index], rotation: u.rotation };
+        }
+        return next;
+      });
+      setSelectedEvIds(new Set());
+    } catch (err) {
+      console.error('Batch rotate error:', err);
+    } finally {
+      setBatchRotating(false);
+    }
+  }
+
   // Extra columns: evidence status for both admin and analyst
   const extraColumns = useMemo(() => {
     if (!selected) return undefined;
@@ -401,8 +524,17 @@ export default function MyAssignments() {
 
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {ev?.status === 'uploaded' && (
+                  <input
+                    type="checkbox"
+                    checked={selectedEvIds.has(globalIndex)}
+                    onChange={() => toggleEvSelection(globalIndex)}
+                    title="Seleccionar para rotación en lote"
+                    style={{ cursor: 'pointer' }}
+                  />
+                )}
                 <button
-                  onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
+                  onClick={() => openModal(globalIndex, info.row.original)}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -414,7 +546,7 @@ export default function MyAssignments() {
                     textDecoration: ev?.status === 'uploaded' ? 'underline' : 'none',
                   }}
                 >
-                  {label}
+                  {label}{ev?.rotation ? ` (${ev.rotation}°)` : ''}
                 </button>
                 {ev?.status === 'uploaded' && (
                   <>
@@ -467,7 +599,7 @@ export default function MyAssignments() {
           return (
             <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
               <button
-                onClick={() => setModalRow({ rowIndex: globalIndex, row: info.row.original })}
+                onClick={() => openModal(globalIndex, info.row.original)}
                 style={{
                   background: ev?.status === 'uploaded' ? 'var(--success)' : 'var(--accent)',
                   color: '#fff',
@@ -532,7 +664,7 @@ export default function MyAssignments() {
         },
       },
     ];
-  }, [selected, page, evidences, isAdmin]);
+  }, [selected, page, evidences, isAdmin, selectedEvIds]);
 
   const assignedRanges = selected && isAdmin ? computeAssignedRanges() : [];
 
@@ -545,6 +677,46 @@ export default function MyAssignments() {
             <h2 className={styles.title}>
               {isAdmin ? 'Asignaciones' : 'Mis Asignaciones'}
             </h2>
+
+            {/* Analyst: filter toolbar */}
+            {!isAdmin && !loading && assignments.length > 0 && (
+              <div className={styles.listFilters}>
+                <div className={styles.viewModeGroup}>
+                  {['active', 'completed', 'all'].map((mode) => (
+                    <button
+                      key={mode}
+                      className={`${styles.viewModeBtn} ${viewMode === mode ? styles.viewModeBtnActive : ''}`}
+                      onClick={() => setViewMode(mode)}
+                    >
+                      {mode === 'active' ? 'Activas' : mode === 'completed' ? 'Completadas' : 'Todas'}
+                      <span className={styles.viewModeCount}>
+                        {mode === 'active'
+                          ? assignments.filter((a) => !a.completed_at).length
+                          : mode === 'completed'
+                          ? assignments.filter((a) => !!a.completed_at).length
+                          : assignments.length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.dateFilters}>
+                  <label className={styles.dateLabel}>
+                    Desde
+                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={styles.dateInput} />
+                  </label>
+                  <label className={styles.dateLabel}>
+                    Hasta
+                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={styles.dateInput} />
+                  </label>
+                  {(dateFrom || dateTo) && (
+                    <button className={styles.clearDatesBtn} onClick={() => { setDateFrom(''); setDateTo(''); }}>
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Admin: progress summary */}
             {isAdmin && progressData.length > 0 && !loading && (
               <div className={styles.progressPanel}>
@@ -583,14 +755,22 @@ export default function MyAssignments() {
 
             {loading ? (
               <p className={styles.muted}>Cargando...</p>
-            ) : assignments.length === 0 ? (
-              <p className={styles.muted}>No tienes asignaciones aun.</p>
+            ) : filteredAssignments.length === 0 ? (
+              <p className={styles.muted}>
+                {assignments.length === 0
+                  ? 'No tienes asignaciones aun.'
+                  : viewMode === 'active'
+                  ? 'No tienes asignaciones activas.'
+                  : viewMode === 'completed'
+                  ? 'No tienes asignaciones completadas.'
+                  : 'No hay asignaciones en este rango de fechas.'}
+              </p>
             ) : (
               <div className={styles.list}>
-                {assignments.map((a) => (
+                {filteredAssignments.map((a) => (
                   <div
                     key={a.id}
-                    className={styles.card}
+                    className={`${styles.card} ${a.completed_at ? styles.cardCompleted : ''}`}
                     onClick={() => setSelected(a)}
                   >
                     <div>
@@ -601,11 +781,24 @@ export default function MyAssignments() {
                       {isAdmin && a.user_name && (
                         <span className={styles.userName}> — {a.user_name}</span>
                       )}
+                      {a.completed_at && (
+                        <span className={styles.completedBadge}>
+                          Completada {new Date(a.completed_at).toLocaleDateString()}
+                        </span>
+                      )}
                     </div>
                     <div className={styles.cardRight}>
                       <span className={styles.date}>
                         {new Date(a.created_at).toLocaleString()}
                       </span>
+                      {!isAdmin && (
+                        <button
+                          className={a.completed_at ? styles.reactivateBtn : styles.completeBtn}
+                          onClick={(e) => handleToggleComplete(e, a.id)}
+                        >
+                          {a.completed_at ? 'Reactivar' : 'Completar'}
+                        </button>
+                      )}
                       {isAdmin && (
                         <button
                           className={styles.deleteBtn}
@@ -747,6 +940,58 @@ export default function MyAssignments() {
               </div>
             )}
 
+            {/* Admin: batch rotation toolbar */}
+            {isAdmin && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
+                padding: '0.5rem 0.8rem', background: 'var(--bg-card, #f8f9fa)',
+                borderRadius: 'var(--radius)', marginBottom: '0.5rem',
+                border: '1px solid var(--border, #e0e0e0)',
+              }}>
+                <button
+                  onClick={selectAllPageEvidences}
+                  style={{
+                    background: 'var(--accent, #2c3e6b)', color: '#fff', border: 'none',
+                    fontSize: '0.72rem', padding: '0.3rem 0.6rem', borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Seleccionar todas
+                </button>
+                <button
+                  onClick={() => setSelectedEvIds(new Set())}
+                  style={{
+                    background: 'transparent', border: '1px solid var(--border, #ccc)',
+                    fontSize: '0.72rem', padding: '0.3rem 0.6rem', borderRadius: 'var(--radius)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Deseleccionar
+                </button>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)' }}>
+                  {selectedEvIds.size} seleccionada{selectedEvIds.size !== 1 ? 's' : ''}
+                </span>
+                <span style={{ borderLeft: '1px solid var(--border, #ccc)', height: '1.2rem' }} />
+                <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Rotar a:</span>
+                {[0, 90, 180, 270].map((deg) => (
+                  <button
+                    key={deg}
+                    onClick={() => handleBatchRotate(deg)}
+                    disabled={selectedEvIds.size === 0 || batchRotating}
+                    style={{
+                      background: deg === 0 ? '#27ae60' : '#2c3e6b', color: '#fff', border: 'none',
+                      fontSize: '0.7rem', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius)',
+                      cursor: selectedEvIds.size === 0 || batchRotating ? 'not-allowed' : 'pointer',
+                      opacity: selectedEvIds.size === 0 || batchRotating ? 0.5 : 1,
+                    }}
+                  >
+                    {deg === 0 ? 'Original (0°)' : `${deg}°`}
+                  </button>
+                ))}
+                {batchRotating && <span style={{ fontSize: '0.72rem', color: 'var(--accent)' }}>Rotando...</span>}
+              </div>
+            )}
+
             <FilteredTable
               rows={filteredRows}
               page={page}
@@ -828,6 +1073,12 @@ export default function MyAssignments() {
           onDelete={handleDeleteEvidence}
           onClose={() => setModalRow(null)}
           readOnly={isAdmin}
+          onRotateSave={(rowIndex, newRotation) => {
+            setEvidences((prev) => {
+              if (!prev[rowIndex]) return prev;
+              return { ...prev, [rowIndex]: { ...prev[rowIndex], rotation: newRotation } };
+            });
+          }}
           rowLabel={`Fila ${modalRow.rowIndex} de ${total}`}
           onPrev={filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex) > 0 ? () => navigateModal(-1) : null}
           onNext={filteredRows.findIndex((r) => r._globalIndex === modalRow.rowIndex) < filteredRows.length - 1 ? () => navigateModal(1) : null}

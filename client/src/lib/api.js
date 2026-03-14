@@ -127,6 +127,11 @@ export async function getAssignmentSiblings(id) {
   return res.data;
 }
 
+export async function toggleAssignmentComplete(id) {
+  const res = await api.patch(`/assignments/${id}/complete`);
+  return res.data;
+}
+
 export async function getAssignmentsProgress() {
   const res = await api.get('/assignments/progress');
   return res.data;
@@ -145,8 +150,23 @@ export async function getEvidences(assignmentId, { siblings = false } = {}) {
   return res.data;
 }
 
+export async function getEvidenceDetail(id) {
+  const res = await api.get(`/evidences/detail/${id}`);
+  return res.data;
+}
+
 export async function deleteEvidence(id) {
   const res = await api.delete(`/evidences/${id}`);
+  return res.data;
+}
+
+export async function batchLoadEvidenceDetails(ids) {
+  const res = await api.post('/evidences/batch-detail', { ids });
+  return res.data;
+}
+
+export async function batchRotateEvidences(ids, rotation) {
+  const res = await api.patch('/evidences/batch-rotate', { ids, rotation });
   return res.data;
 }
 

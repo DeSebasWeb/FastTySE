@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import styles from './EvidenceModal.module.css';
 import ImageAnnotator from './ImageAnnotator';
-import { autoLoadE14 } from '../lib/api';
+import { autoLoadE14, batchRotateEvidences } from '../lib/api';
 
 function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRight, extraTools }) {
   const [zoom, setZoom] = useState(1);
@@ -74,7 +74,7 @@ function ImageViewer({ src, rotation, size, showRotate, onRotateLeft, onRotateRi
   );
 }
 
-export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose, readOnly, rowLabel, onPrev, onNext }) {
+export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose, readOnly, rowLabel, onPrev, onNext, onRotateSave }) {
   const hasExisting = evidence?.status === 'uploaded';
   const [editing, setEditing] = useState(!hasExisting);
   const [imageData, setImageData] = useState(evidence?.image_data || null);
@@ -96,7 +96,7 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
     setAutoE14Status('idle');
     autoE14StatusRef.current = 'idle';
     setAutoE14Label('');
-  }, [evidence?.id, evidence?.row_index, rowLabel]);
+  }, [evidence?.id, evidence?.row_index, evidence?.image_data, rowLabel]);
 
   // Auto-load E14 when opening in edit mode without existing image
   // Use rowLabel as stable dependency instead of row object (new ref each render)
@@ -143,6 +143,29 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
 
     return () => { cancelled = true; };
   }, [editing, readOnly, imageData, hasExisting, rowLabel]);
+
+  // Auto-detect orientation: if image is landscape (wider than tall), auto-rotate to 270°
+  // Only applies when loading a NEW image (not when viewing existing evidence with saved rotation)
+  const autoRotatedRef = useRef(false);
+  useEffect(() => {
+    if (!imageData || autoRotatedRef.current) return;
+    // Skip auto-rotation for existing evidence that already has a saved rotation
+    if (hasExisting && evidence?.rotation != null) return;
+    const img = new Image();
+    img.onload = () => {
+      if (img.width > img.height * 1.2) {
+        // Image is landscape — likely needs rotation to be viewed vertically
+        setRotation(270);
+      }
+      autoRotatedRef.current = true;
+    };
+    img.src = imageData;
+  }, [imageData]);
+
+  // Reset auto-rotation flag when switching rows
+  useEffect(() => {
+    autoRotatedRef.current = false;
+  }, [evidence?.id, evidence?.row_index, rowLabel]);
 
   useEffect(() => {
     if (readOnly) return;
@@ -246,6 +269,24 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
 
   // ---- READ ONLY MODE (Admin viewing) ----
   if (readOnly) {
+    const rotationChanged = rotation !== (evidence?.rotation || 0);
+
+    async function handleSaveRotation() {
+      if (!evidence?.id) return;
+      setSaving(true);
+      try {
+        // Use batch-rotate endpoint directly by evidence ID — avoids creating
+        // duplicate evidence when admin rotates a sibling's evidence
+        await batchRotateEvidences([evidence.id], rotation);
+        onRotateSave?.(evidence.row_index, rotation);
+        onClose();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setSaving(false);
+      }
+    }
+
     return (
       <div className={styles.overlay} onClick={onClose}>
         <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
@@ -256,7 +297,29 @@ export default function EvidenceModal({ evidence, row, onSave, onDelete, onClose
           </div>
           {hasExisting ? (
             <>
-              <ImageViewer src={evidence.image_data} rotation={evidence.rotation || 0} size="large" />
+              {evidence.image_data ? (
+                <ImageViewer
+                  src={evidence.image_data}
+                  rotation={rotation}
+                  size="large"
+                  showRotate
+                  onRotateLeft={rotateLeft}
+                  onRotateRight={rotateRight}
+                />
+              ) : (
+                <p style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>Cargando imagen...</p>
+              )}
+              {rotationChanged && (
+                <div style={{ textAlign: 'center', padding: '0.5rem' }}>
+                  <button
+                    className={styles.saveBtn}
+                    onClick={handleSaveRotation}
+                    disabled={saving}
+                  >
+                    {saving ? 'Guardando...' : 'Guardar rotación'}
+                  </button>
+                </div>
+              )}
               {evidence.observations && (
                 <div className={styles.field}>
                   <label className={styles.label}>Observaciones</label>

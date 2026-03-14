@@ -29,8 +29,28 @@ router.post('/evidences', authMiddleware, async (req, res) => {
   }
 });
 
+// Columns to return in the list endpoint (excludes heavy image_data)
+const LIST_COLS = 'id, assignment_id, row_index, status, rotation, observations, updated_at';
+
+// GET /api/evidences/detail/:id — get a single evidence WITH image_data (for modal)
+// Must be registered BEFORE /:assignmentId to avoid route conflict
+router.get('/evidences/detail/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM evidences WHERE id = $1`,
+      [req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Evidence not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Get evidence detail error:', err);
+    res.status(500).json({ error: 'Failed to fetch evidence detail' });
+  }
+});
+
 // GET /api/evidences/:assignmentId — get all evidences for an assignment
 // Admin with ?siblings=true gets evidences from all assignments sharing same filters
+// Does NOT return image_data (use GET /api/evidences/detail/:id for that)
 router.get('/evidences/:assignmentId', authMiddleware, async (req, res) => {
   try {
     const assignmentId = req.params.assignmentId;
@@ -50,12 +70,12 @@ router.get('/evidences/:assignmentId', authMiddleware, async (req, res) => {
       const ids = siblingIds.rows.map((r) => r.id);
 
       result = await pool.query(
-        `SELECT * FROM evidences WHERE assignment_id = ANY($1) ORDER BY row_index`,
+        `SELECT ${LIST_COLS} FROM evidences WHERE assignment_id = ANY($1) ORDER BY row_index`,
         [ids]
       );
     } else {
       result = await pool.query(
-        `SELECT * FROM evidences WHERE assignment_id = $1 ORDER BY row_index`,
+        `SELECT ${LIST_COLS} FROM evidences WHERE assignment_id = $1 ORDER BY row_index`,
         [assignmentId]
       );
     }
@@ -72,6 +92,68 @@ router.get('/evidences/:assignmentId', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Get evidences error:', err);
     res.status(500).json({ error: 'Failed to fetch evidences' });
+  }
+});
+
+// POST /api/evidences/batch-detail — get image_data for multiple evidence IDs in one request
+router.post('/evidences/batch-detail', authMiddleware, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array required' });
+    }
+    // Limit to 50 at a time to avoid huge payloads
+    const limited = ids.slice(0, 50);
+    const result = await pool.query(
+      `SELECT id, assignment_id, row_index, status, image_data, rotation, observations, updated_at
+       FROM evidences WHERE id = ANY($1)`,
+      [limited]
+    );
+    // Return as map keyed by row_index for easy merging
+    const map = {};
+    for (const row of result.rows) {
+      map[row.row_index] = row;
+    }
+    res.json(map);
+  } catch (err) {
+    console.error('Batch detail error:', err);
+    res.status(500).json({ error: 'Failed to fetch batch details' });
+  }
+});
+
+// PATCH /api/evidences/batch-rotate — set rotation for multiple evidences at once
+router.patch('/evidences/batch-rotate', authMiddleware, async (req, res) => {
+  try {
+    const { ids, rotation } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0 || rotation == null) {
+      return res.status(400).json({ error: 'ids array and rotation required' });
+    }
+    const validRotation = [0, 90, 180, 270].includes(rotation) ? rotation : 0;
+    const limited = ids.slice(0, 200);
+
+    // Authorization: analysts can only rotate their own evidences
+    if (req.user.rol !== 'Administrador') {
+      const ownerCheck = await pool.query(
+        `SELECT COUNT(*) AS cnt FROM evidences e
+         JOIN assignments a ON e.assignment_id = a.id
+         WHERE e.id = ANY($1) AND a.user_id != $2`,
+        [limited, req.user.id]
+      );
+      if (Number(ownerCheck.rows[0].cnt) > 0) {
+        return res.status(403).json({ error: 'No tienes permiso para rotar estas evidencias' });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE evidences SET rotation = $1, updated_at = NOW()
+       WHERE id = ANY($2)
+       RETURNING id, row_index, rotation`,
+      [validRotation, limited]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Batch rotate error:', err);
+    res.status(500).json({ error: 'Failed to batch rotate' });
   }
 });
 

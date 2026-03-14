@@ -412,3 +412,161 @@
   color: var(--text-muted);
   min-width: 50px;
 }
+
+/* List filters toolbar */
+.listFilters {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.viewModeGroup {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.viewModeBtn {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: none;
+  border-right: 1px solid var(--border);
+  font-size: 0.78rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+
+.viewModeBtn:last-child {
+  border-right: none;
+}
+
+.viewModeBtn:hover {
+  background: var(--surface-hover);
+}
+
+.viewModeBtnActive {
+  background: var(--accent);
+  color: #fff;
+}
+
+.viewModeBtnActive:hover {
+  background: var(--accent-hover);
+}
+
+.viewModeCount {
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 8px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+}
+
+.viewModeBtnActive .viewModeCount {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.dateFilters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.dateLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.dateInput {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.clearDatesBtn {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.clearDatesBtn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Completed card styling */
+.cardCompleted {
+  opacity: 0.6;
+  border-left: 3px solid var(--success, #27ae60);
+}
+
+.completedBadge {
+  display: inline-block;
+  font-size: 0.68rem;
+  color: var(--success, #27ae60);
+  background: rgba(46, 204, 113, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+  font-weight: 600;
+}
+
+.completeBtn {
+  background: none;
+  border: 1px solid var(--success, #27ae60);
+  color: var(--success, #27ae60);
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.completeBtn:hover {
+  background: var(--success, #27ae60);
+  color: #fff;
+}
+
+.reactivateBtn {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reactivateBtn:hover {
+  background: var(--accent);
+  color: #fff;
+}
